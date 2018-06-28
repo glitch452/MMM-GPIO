@@ -1,0 +1,35 @@
+{
+	"name": "mmm-gpio",
+	"version": "1.0.0",
+	"description": "A MagicMirror² module that allows control of buttons, led's and generic outputs on the Raspberry Pi GPIO Pins.",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/glitch452/MMM-GPIO"
+	},
+	"keywords": [
+		"smart mirror",
+		"magicmirror",
+		"mirror",
+		"module",
+		"raspberry pi",
+		"led",
+		"button",
+		"gpio"
+	],
+	"author": "David Dearden",
+	"contributors": "https://github.com/glitch452/MMM-GPIO/graphs/contributors",
+	"license": "MIT",
+	"bugs": {
+		"url": "https://github.com/glitch452/MMM-GPIO/issues"
+	},
+	"homepage": "https://github.com/glitch452/MMM-GPIO#readme",
+	"scripts": {
+		"postinstall": "node_modules/.bin/electron-rebuild -e ../../node_modules/electron"
+	},
+	"dependencies": {
+		"electron-rebuild": "^1.2.1",
+		"pi-blaster.js": "latest",
+		"onoff": "latest",
+		"axis.js": "latest"
+	}
+}
