@@ -39,6 +39,8 @@ module.exports = NodeHelper.create({
 		self.developerMode = false;
 		self.processName = "";
 		self.resources = {};
+		self.animations = {};
+		self.onoff = {};
 		
 		this.expressApp.get("/" + self.name, function(req, res) { self.getHandler(req, res); });
 		
@@ -145,8 +147,8 @@ module.exports = NodeHelper.create({
 			r = resourceList[i];
 			if (r.type === "OUT") {
 				self.initializedOnOff = true;
-				r.onoff = new Gpio(r.pin, "out");
-				self.actionHandler({ name: r.name, action: "SET", value: r.value });
+				self.onoff[r.name] = new Gpio(r.pin, "out");
+				self.setOUT(r.name, r.value);
 			} else if (r.type === "BTN") {
 				
 			}
@@ -178,16 +180,19 @@ module.exports = NodeHelper.create({
 				case "INCREASE": self.increaseLED(payload.name, payload.value); break;
 				case "DECREASE": self.decreaseLED(payload.name, payload.value); break;
 				case "TOGGLE": self.toggleLED(payload.name, payload.value); break;
-				case "FLASH": self.flashLED(payload.name, payload.time, payload.offTime, payload.value); break;
+				case "BLINK": self.blinkLED(payload.name, payload.time, payload.offTime, payload.value); break;
 				default: return false;
 			}
 		} else if (resource.type === "OUT") {
+			self.clearAnimation(payload.name);
 			switch (payload.action) {
 				case "SET": self.setOUT(payload.name, payload.value); break;
+				case "TOGGLE": self.toggleOUT(payload.name, payload.value); break;
+				case "BLINK": self.blinkOUT(payload.name, payload.time, payload.offTime, payload.value); break;
 				default: return false;
 			}
 		} else if (resource.type === "BTN") {
-			
+			return false;
 		} else {
 			return false;
 		}
@@ -219,23 +224,28 @@ module.exports = NodeHelper.create({
 			if (payload.action === "GET_ALL") {
 				var resources = [];
 				var resourceList = Object.values(self.resources);
-				for (var i = 0; i < resourceList.length; i++) {
-					resource = Object.assign({}, resourceList[i], { animation: null, onoff: null });
-					delete resource.animation;
-					delete resource.onoff;
-					resources.push(resource);
-				}
+				for (var i = 0; i < resourceList.length; i++) { resources.push(resourceList[i]); }
 				output = Object.assign({ error: false }, { data: resources });
 				res.send(JSON.stringify(output));
 			} else if (payload.action === "GET" || self.actionHandler(payload)) {
-				resource = Object.assign({}, self.resources[payload.name], { animation: null, onoff: null });
-				delete resource.animation;
-				delete resource.onoff;
-				output = Object.assign({ error: false }, { data: resource });
+				output = Object.assign({ error: false }, { data: self.resources[payload.name] });
 				res.send(JSON.stringify(output));
 			} else {
-				res.send(JSON.stringify({ error: true, message: "The action \" + payload.action + \" is not valid." }));
+				res.send(JSON.stringify({ error: true, message: "The action \"" + payload.action + "\" is not valid." }));
 			}
+		}
+	},
+	
+	/**
+	 * The clearAnimation function clears any animation that might be runnig on a given resource.
+	 * 
+	 * @param name (string) The name of the resource to clear the animation for
+	 */
+	clearAnimation: function(name) {
+		var self = this;
+		if (!axis.isUndefined(self.resources[name])) {
+			clearTimeout(self.animations[name]);
+			delete self.animations[name];
 		}
 	},
 	
@@ -254,22 +264,58 @@ module.exports = NodeHelper.create({
 		var actualValue = value;
 		if (r.activeLow) { actualValue = value === 0 ? 1 : 0; }
 		
-		r.onoff.write(actualValue, function(err) {
-			if (err && self.developerMode) {
-				console.log(self.name + ": setOUT(): Unable to set resource \"" + name + "\" to value \"" + value + "\".  Error: \"" + JSON.stringify(err) + "\"");
-			} else {
+		self.onoff[r.name].write(actualValue, function(err) {
+			if (!err) {
 				r.value = value;
+			} else if (self.developerMode) {
+				console.log(self.name + ": setOUT(): Unable to set resource \"" + name + "\" to value \"" + value + "\".  Error: \"" + JSON.stringify(err) + "\"");
 			}
 		});
 	},
 	
 	/**
-	 * The clearAnimation function clears any animation that might be runnig on a given resource.
+	 * The toggleOUT function toggles the output on and off
+	 * 
+	 * @param name (string) The name of the resource to toggle
 	 */
-	clearAnimation: function(ledName) {
+	toggleOUT: function(name) {
 		var self = this;
-		if (!self.initializedLED || axis.isUndefined(self.resources[ledName])) { return; }
-		clearTimeout(self.resources[ledName].animation);
+		if (!self.initializedOnOff || axis.isUndefined(self.resources[name])) { return; }
+		var r = self.resources[name];
+		if (self.developerMode) { console.log(self.name + ": toggleOUT(): Name: \"" + name + "\"."); }
+		var value = r.value === 0 ? 1 : 0;
+		self.setOUT(name, value);
+	},
+	
+	/**
+	 * The blinkOUT function toggles the output on and off
+	 * 
+	 * @param name (string) The name of the resource to blink
+	 * @param time (number) The number of milliseconds to keep the output 'on'
+	 * @param offTime (number) The number of milliseconds to keep the output 'off'.  The time parameter is used if this is not provided.
+	 */
+	blinkOUT: function(name, time, offTime) {
+		var self = this;
+		if (!self.initializedOnOff || axis.isUndefined(self.resources[name])) { return; }
+		time = Number(time);
+		offTime = Number(offTime);
+		if (!axis.isNumber(time) || isNaN(time) || time <= 0) { time = 750; }
+		if (!axis.isNumber(offTime) || isNaN(offTime) || offTime <= 0) { offTime = time; }
+		var r = self.resources[name];
+		var value = r.value === 0 ? 1 : 0;
+		
+		if (self.developerMode) { console.log(self.name + ": blinkOUT(): Name: \"" + name + "\" time: \"" + time + "\" offTime: \"" + offTime + "\""); }
+		
+		var blink;
+		
+		blink = function() {
+			var blinkTime = offTime;
+			if (r.value === 0) { blinkTime = time; }
+			self.toggleOUT(name, value);
+			self.animations[r.name] = setTimeout(function(){ blink(); }, blinkTime);
+		};
+		
+		blink();
 	},
 	
 	/**
@@ -333,6 +379,7 @@ module.exports = NodeHelper.create({
 	 * The toggleLED function toggles the LED on and off, using the last value as its on level
 	 * 
 	 * @param ledName (string) The name of the resource to update
+	 * @param value (number) The brightness value use when turning the LED on.  The previously used value (or 1) will be used if this is not provided.
 	 */
 	toggleLED: function(ledName, value) {
 		var self = this;
@@ -353,11 +400,14 @@ module.exports = NodeHelper.create({
 	},
 	
 	/**
-	 * The toggleLED function toggles the LED on and off, using the last value as its on level
+	 * The blinkLED function toggles the LED on and off, using the last value as its on level
 	 * 
-	 * @param ledName (string) The name of the resource to update
+	 * @param ledName (string) The name of the resource to blink
+	 * @param time (number) The number of milliseconds to keep the output 'on'
+	 * @param offTime (number) The number of milliseconds to keep the output 'off'.  The time parameter is used if this is not provided.
+	 * @param value (number) The brightness value to use for the 'on' duration
 	 */
-	flashLED: function(ledName, time, offTime, value) {
+	blinkLED: function(ledName, time, offTime, value) {
 		var self = this;
 		if (!self.initializedLED || axis.isUndefined(self.resources[ledName])) { return; }
 		time = Number(time);
@@ -367,21 +417,18 @@ module.exports = NodeHelper.create({
 		if (!axis.isNumber(offTime) || isNaN(offTime) || offTime <= 0) { offTime = time; }
 		if (!axis.isNumber(value) || isNaN(value) || value <= 0 || value > 1) { value = null; }
 		var r = self.resources[ledName];
-		if (self.developerMode) { console.log(self.name + ": flashLED(): Name: \"" + ledName + "\" value: \"" + value + "\" time: \"" + time + "\" offTime: \"" + offTime + "\""); }
+		if (self.developerMode) { console.log(self.name + ": blinkLED(): Name: \"" + ledName + "\" value: \"" + value + "\" time: \"" + time + "\" offTime: \"" + offTime + "\""); }
 		
-		var flashON, flashOFF;
+		var blink;
 		
-		flashON = function() {
+		blink = function() {
+			var blinkTime = offTime;
+			if (r.value === 0) { blinkTime = time; }
 			self.toggleLED(ledName, value);
-			r.animation = setTimeout(function(){ flashOFF(); }, time);
+			self.animations[r.name] = setTimeout(function(){ blink(); }, blinkTime);
 		};
 		
-		flashOFF = function() {
-			self.toggleLED(ledName, value);
-			r.animation = setTimeout(function(){ flashON(); }, offTime);
-		};
-		
-		if (r.value === 0) { flashON(); } else { flashOFF(); }
+		blink();
 	},
 	
 	/**
@@ -390,16 +437,19 @@ module.exports = NodeHelper.create({
 	stop: function() {
 		var self = this;
 		//exec("sudo pkill " + self.processName, { timeout: 1500 }, function(error, stdout, stderr) { });
-		if (!self.initializedLED) { return; }
+		if (self.initializedLED) {
+			exec("sudo pkill " + self.processName, { timeout: 1500 }, function(error, stdout, stderr) { });
+		}
 		var resourceList = Object.values(self.resources);
 		for(var i = 0; i < resourceList.length; i++) {
 			var r = resourceList[i];
 			if (r.type === "LED") {
 				if (!axis.isNull(r.exitValue)) {
-					self.setLED(r.name, r.exitValue);
+					//self.setLED(r.name, r.exitValue);
 				}
 			} else if (r.type === "OUT") {
-				r.onoff.unexport();
+				if (self.developerMode) { console.log(self.name + ": stop(): Releasing resource: \"" + r.name + "\" pin: \"" + r.pin + "\". "); }
+				self.onoff[r.name].unexport();
 			} else if (r.type === "BTN") {
 				
 			}
