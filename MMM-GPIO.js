@@ -8,6 +8,8 @@
  * MIT Licensed.
  */
 
+var axis, Log;
+
 /**
  * Register the module with the MagicMirror program
  */
@@ -41,6 +43,9 @@ Module.register("MMM-GPIO", {
 		var i, resource, pin;
 		self.instanceID = self.identifier + "_" + Math.random().toString().substring(2);
 		self.defaults.scriptPath = self.data.path + "pi-blaster";
+		self.resources = {};
+		self.pinList = [];
+		self.nameList = [];
 		self.validPinSchemes = [ "BCMv1", "BCMv2" ];
 		self.pinMapping = [
 			{ "BOARD": 10, "BCMv1": 15, "BCMv2": 15, "WPI": 16 },
@@ -75,31 +80,69 @@ Module.register("MMM-GPIO", {
 		if (!axis.isArray(self.config.leds)) { self.config.leds = self.defaults.leds; }
 		if (!self.validPinSchemes.includes(self.config.pinScheme)) { self.config.pinScheme = self.defaults.pinScheme; }
 		if (!axis.isBoolean(self.config.developerMode)) { self.config.developerMode = self.defaults.developerMode; }
+		if (!axis.isNumber(self.config.debounceTimeout) || isNaN(self.config.debounceTimeout) || self.config.debounceTimeout < 1 ) { self.config.debounceTimeout = self.defaults.debounceTimeout; }
 		
-		self.resources = {};
-		var pinList = [];
-		var pin;
+		// Loop through the provided configurations and add valid ones to the resources
+		for (i = 0; i < self.config.leds.length; i++) { self.addResource("LED", self.config.leds[i]); }
+		for (i = 0; i < self.config.outputs.length; i++) { self.addResource("OUT", self.config.outputs[i]); }
+		for (i = 0; i < self.config.buttons.length; i++) { self.addResource("BTN", self.config.buttons[i]); }
 		
-		// Loop through the provided LED configurations and add valid ones to the resources
-		for (i = 0; i < self.config.leds.length; i++) {
-			resource = self.config.leds[i];
-			
-			if (!axis.isString(resource.name) || resource.name.length < 1) {
-				self.log(("A name has not been provided.  The LED on pin " + resource.pin + " cannot be initialized. "), "warn");
-				continue;
-			}
-			
-			pin = resource.pin;
-			resource.pin = self.validatePin(resource.pin);
-			if (axis.isNull(resource.pin) || pin == 6) {
-				self.log(("Invalid pin number provided (" + pin + ").  The LED \"" + resource.name + "\"cannot be initialized. "), "warn");
-				continue;
-			}
-			
-			if (pinList.includes(resource.pin)) {
-				self.log(("The pin number provided (" + pin + ") is already in use.  The LED \"" + resource.name + "\"cannot be initialized. "), "warn");
-				continue;
-			}
+		self.log(("start(): self.data: " + JSON.stringify(self.data)), "dev");
+		self.log(("start(): self.config: " + JSON.stringify(self.config)), "dev");
+		
+		self.sendSocketNotification("INIT", {
+			instanceID: self.instanceID,
+			scriptPath: self.config.scriptPath,
+			debounceTimeout: self.config.debounceTimeout,
+			resources: self.resources,
+			developerMode: self.config.developerMode
+		});
+		
+	},
+	
+	/**
+	 * Validate the provided pin number against the pinMapping list
+	 * 
+	 * @param type (string) The type of resource
+	 * @param resource (object) The resource to validate
+	 */
+	addResource: function(type, resource) {
+		var self = this;
+		var pin, typeFull;
+		
+		switch (type) {
+			case "LED": typeFull = "LED"; break;
+			case "OUT": typeFull = "Output"; break;
+			case "BTN": typeFull = "Button"; break;
+			default: typeFull = "Unknown Type";
+		}
+		
+		if (!axis.isString(resource.name) || resource.name.length < 1) {
+			self.log(("A name has not been provided.  The " + typeFull + " on pin " + resource.pin + " cannot be initialized. "), "warn");
+			return;
+		}
+		
+		if (self.nameList.includes(resource.name)) {
+			self.log(("The name \"" + resource.name + "\" is already assigned.  The " + typeFull + " on pin " + resource.pin + " cannot be initialized. "), "warn");
+			return;
+		}
+		
+		pin = resource.pin;
+		resource.pin = self.validatePin(resource.pin);
+		if (axis.isNull(resource.pin) || (type === "LED" && pin === 6)) {
+			self.log(("Invalid pin number provided (" + pin + ").  The " + typeFull + " \"" + resource.name + "\" cannot be initialized. "), "warn");
+			return;
+		}
+		
+		if (self.pinList.includes(resource.pin)) {
+			self.log(("The pin number provided (" + pin + ") is already in use.  The " + typeFull + " \"" + resource.name + "\"cannot be initialized. "), "warn");
+			return;
+		}
+		
+		var result = { name: resource.name, pin: resource.pin };
+		
+		if (type === "LED") {
+			result.type = "LED";
 			
 			if (!axis.isNumber(resource.value) || isNaN(resource.value)) { resource.value = 0; }
 			else if (resource.value < 0) { resource.value = 0; }
@@ -111,53 +154,28 @@ Module.register("MMM-GPIO", {
 			
 			if (!axis.isBoolean(resource.activeLow)) { resource.activeLow = false; }
 			
-			resource.type = "LED";
-			
-			pinList.push(resource.pin);
-			self.resources[resource.name] = resource;
-		}
-		
-		// Loop through the provided OUTPUT configurations and add valid ones to the resources
-		for (i = 0; i < self.config.outputs.length; i++) {
-			resource = self.config.outputs[i];
-			
-			if (!axis.isString(resource.name) || resource.name.length < 1) {
-				self.log(("A name has not been provided.  The OUTPUT on pin " + resource.pin + " cannot be initialized. "), "warn");
-				continue;
-			}
-			
-			pin = resource.pin;
-			resource.pin = self.validatePin(resource.pin);
-			if (axis.isNull(resource.pin)) {
-				self.log(("Invalid pin number provided (" + pin + ").  The OUTPUT \"" + resource.name + "\"cannot be initialized. "), "warn");
-				continue;
-			}
-			
-			if (pinList.includes(resource.pin)) {
-				self.log(("The pin number provided (" + pin + ") is already in use.  The OUTPUT \"" + resource.name + "\"cannot be initialized. "), "warn");
-				continue;
-			}
+			result.value = resource.value;
+			result.exitValue = resource.exitValue;
+			result.activeLow = resource.activeLow;
+		} else if (type === "OUT") {
+			result.type = "OUT";
 			
 			if (resource.value !== 0 && resource.value !== 1) { resource.value = 0; }
 			if (!axis.isBoolean(resource.activeLow)) { resource.activeLow = false; }
 			
-			resource.type = "OUT";
+			result.value = resource.value;
+			result.activeLow = resource.activeLow;
+		} else if (type === "BTN") {
+			result.type = "BTN";
 			
-			pinList.push(resource.pin);
-			self.resources[resource.name] = resource;
+			if (!axis.isBoolean(resource.activeLow)) { resource.activeLow = false; }
 			
+			result.activeLow = resource.activeLow;
 		}
 		
-		
-		self.log(("start(): self.data: " + JSON.stringify(self.data)), "dev");
-		self.log(("start(): self.config: " + JSON.stringify(self.config)), "dev");
-		
-		self.sendSocketNotification("INIT", {
-			instanceID: self.instanceID,
-			scriptPath: self.config.scriptPath,
-			resources: self.resources,
-			developerMode: self.config.developerMode
-		});
+		self.pinList.push(resource.pin);
+		self.nameList.push(resource.name);
+		self.resources[resource.name] =  result;
 		
 	},
 	
@@ -279,14 +297,12 @@ Module.register("MMM-GPIO", {
 		return scripts;
 	},
 	
-	
 	/**
 	 * Override the getStyles function to load CSS files used by this module. 
 	 */
 	getStyles: function () {
 		return [];
 	},
-
 	
 	/**
 	 * Override the getTranslations function to load translation files specific to this module. 

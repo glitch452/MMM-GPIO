@@ -74,6 +74,7 @@ module.exports = NodeHelper.create({
 		var self = this;
 		var i, r;
 		self.developerMode = payload.developerMode;
+		self.debounceTimeout = payload.debounceTimeout;
 		var resourceList = Object.values(payload.resources);
 		if (self.initializedLED || self.initializedOnOff) {
 			if (self.developerMode) { self.sendSocketNotification("LOG", { original: payload, message: ("node_helper.js has already been initialized."), messageType: "dev" } ); }
@@ -141,7 +142,7 @@ module.exports = NodeHelper.create({
 	 */
 	initOnOff: function() {
 		var self = this;
-		var i, r;
+		var i, r, options;
 		var resourceList = Object.values(self.resources);
 		for (i = 0; i < resourceList.length; i++) {
 			r = resourceList[i];
@@ -150,7 +151,9 @@ module.exports = NodeHelper.create({
 				self.onoff[r.name] = new Gpio(r.pin, "out");
 				self.setOUT(r.name, r.value);
 			} else if (r.type === "BTN") {
-				
+				self.initializedOnOff = true;
+				options = { debounceTimeout: self.debounceTimeout, activeLow: r.activeLow };
+				self.onoff[r.name] = new Gpio(r.pin, "in", "both", options);
 			}
 		}
 	},
