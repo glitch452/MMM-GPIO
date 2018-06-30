@@ -40,7 +40,9 @@ module.exports = NodeHelper.create({
 		self.processName = "";
 		self.resources = {};
 		self.animations = {};
+		self.buttonTimeouts = {};
 		self.onoff = {};
+		self.buttonActions = [ "PRESS", "DOUBLE_PRESS", "TRIPPLE_PRESS", "RELEASE", "DOUBLE_RELEASE", "TRIPPLE_RELEASE", "LONG_PRESS"];
 		
 		this.expressApp.get("/" + self.name, function(req, res) { self.getHandler(req, res); });
 		
@@ -74,7 +76,6 @@ module.exports = NodeHelper.create({
 		var self = this;
 		var i, r;
 		self.developerMode = payload.developerMode;
-		self.debounceTimeout = payload.debounceTimeout;
 		var resourceList = Object.values(payload.resources);
 		if (self.initializedLED || self.initializedOnOff) {
 			if (self.developerMode) { self.sendSocketNotification("LOG", { original: payload, message: ("node_helper.js has already been initialized."), messageType: "dev" } ); }
@@ -147,15 +148,170 @@ module.exports = NodeHelper.create({
 		for (i = 0; i < resourceList.length; i++) {
 			r = resourceList[i];
 			if (r.type === "OUT") {
+				if (self.developerMode) { console.log(self.name + ": Initializing resource (Output) \"" + r.name + "\" on pin \"" + r.pin + "\"."); }
 				self.initializedOnOff = true;
 				self.onoff[r.name] = new Gpio(r.pin, "out");
 				self.setOUT(r.name, r.value);
 			} else if (r.type === "BTN") {
+				if (self.developerMode) { console.log(self.name + ": Initializing resource (Button) \"" + r.name + "\" on pin \"" + r.pin + "\"."); }
 				self.initializedOnOff = true;
-				options = { debounceTimeout: self.debounceTimeout, activeLow: r.activeLow };
+				r.pressCount = 0;
+				r.releaseCount = 0;
+				r.isPressed = false;
+				r.pressedTime = 0;
+				r.pressID = r.name + "1";
+				r.releaseID = r.name + "2";
+				r.longPressID = r.name + "3";
+				r.longPressAlertID = r.name + "4";
+				r.longPressAlertIsActive = false;
+				if (r.debounceTimeout > 0) { options = { debounceTimeout: r.debounceTimeout, activeLow: r.activeLow }; }
+				else { options = { activeLow: r.activeLow }; }
+				// Create onoff object
 				self.onoff[r.name] = new Gpio(r.pin, "in", "both", options);
+				// Add the interrupt callback
+				self.onoff[r.name].watch(self.watchHandler(r.name));
 			}
 		}
+	},
+	
+	/**
+	 * The watchHandler function handles iunterrupt events for buttons
+	 * 
+	 * @param name (string) The name of the button being watched
+	 */
+	watchHandler: function(name) {
+		var self = this;
+		var r = self.resources[name];
+		
+		return function (err, value) {
+			
+			if (err) {
+				if (self.developerMode) { console.log(self.name + ": watchHandler(): \"" + name + "\" error: \"" + JSON.stringify(err) + "\""); }
+				return;
+			}
+			
+			if (value === 1 && !r.isPressed) {
+				r.isPressed = true;
+				r.pressCount++;
+				
+				if (r.pressCount === 1) {
+					// Set timeout for the long press action trigger
+					self.buttonTimeouts[r.longPressID] = setTimeout(function(){
+						self.buttonPressHandler(r.name, "LONG_PRESS");
+						r.pressCount = 0;
+						r.releaseCount = -1;
+					}, r.longPressTime);
+					// Set timeout for the regular press action trigger
+					self.buttonTimeouts[r.pressID] = setTimeout(function(){
+						self.buttonPressHandler(r.name, "PRESS");
+						r.pressCount = 0;
+					}, r.multiPressTimeout);		
+					// Set timeout for the long press alert action trigger
+					self.buttonTimeouts[r.longPressAlertID] = setTimeout(function(){
+						self.buttonPressHandler(r.name, "LONG_PRESS_ALERT");
+					}, r.multiPressTimeout);
+				} else if (r.pressCount === 2) {
+					clearTimeout(self.buttonTimeouts[r.pressID]);
+					clearTimeout(self.buttonTimeouts[r.releaseID]);
+					self.buttonTimeouts[r.pressID] = setTimeout(function(){
+						self.buttonPressHandler(r.name, "DOUBLE_PRESS");
+						r.pressCount = 0;
+					}, r.multiPressTimeout);
+				} else if (r.pressCount === 3) {
+					clearTimeout(self.buttonTimeouts[r.pressID]);
+					clearTimeout(self.buttonTimeouts[r.releaseID]);
+					self.buttonTimeouts[r.pressID] = setTimeout(function(){
+						self.buttonPressHandler(r.name, "TRIPPLE_PRESS");
+						r.pressCount = 0;
+					}, r.multiPressTimeout);
+				}
+			} else if (value === 0 && r.isPressed) {
+				r.isPressed = false;
+				r.releaseCount++;
+				
+				clearTimeout(self.buttonTimeouts[r.longPressID]);
+				clearTimeout(self.buttonTimeouts[r.longPressAlertID]);
+				
+				if (r.releaseCount === 0) {
+					self.buttonPressHandler(r.name, "LONG_RELEASE");
+				} else if (r.releaseCount === 1) {
+					self.buttonTimeouts[r.releaseID] = setTimeout(function(){
+						// If a long-press alert was triggered, clear it, otherwise trigger the release action
+						if (r.longPressAlertIsActive) { self.buttonPressHandler(r.name, "LONG_PRESS_ALERT_CLEAR"); }
+						else { self.buttonPressHandler(r.name, "RELEASE"); }
+						r.releaseCount = 0;
+					}, r.multiPressTimeout);
+				} else if (r.releaseCount === 2) {
+					self.buttonTimeouts[r.releaseID] = setTimeout(function(){
+						self.buttonPressHandler(r.name, "DOUBLE_RELEASE");
+						r.releaseCount = 0;
+					}, r.multiPressTimeout);
+				} else if (r.releaseCount === 3) {
+					self.buttonTimeouts[r.releaseID] = setTimeout(function(){
+						self.buttonPressHandler(r.name, "TRIPPLE_RELEASE");
+						r.releaseCount = 0;
+					}, r.multiPressTimeout);
+				}
+			}
+			
+		};
+	},
+	
+	/**
+	 * The buttonPressHandler function triggers actions associated to button presses
+	 * 
+	 * @param name (string) The name of the button being pressed
+	 * @param type (string) The type of the press being triggered
+	 */
+	buttonPressHandler: function(name, type) {
+		var self = this;
+		var r = self.resources[name];
+		
+		if (self.developerMode) { console.log(self.name + ": watchHandler(): Button \"" + r.name + "\"  Action: \"" + type + "\""); }
+		
+		
+		if (type === "LONG_PRESS_ALERT") {
+			r.longPressAlertIsActive = true;
+		} else if (type === "LONG_PRESS_ALERT_CLEAR") {
+			r.longPressAlertIsActive = false;
+		}
+		
+		/*
+		switch (type) {
+			case "PRESS":
+				if (self.developerMode) { console.log(self.name + ": watchHandler(): Button \"" + r.name + "\" single press."); }
+				break;
+			case "DOUBLE_PRESS":
+				if (self.developerMode) { console.log(self.name + ": watchHandler(): Button \"" + r.name + "\" double press."); }
+				break;
+			case "TRIPPLE_PRESS":
+				if (self.developerMode) { console.log(self.name + ": watchHandler(): Button \"" + r.name + "\" tripple press."); }
+				break;
+			case "RELEASE":
+				if (self.developerMode) { console.log(self.name + ": watchHandler(): Button \"" + r.name + "\" single release."); }
+				break;
+			case "DOUBLE_RELEASE":
+				if (self.developerMode) { console.log(self.name + ": watchHandler(): Button \"" + r.name + "\" double release."); }
+				break;
+			case "TRIPPLE_RELEASE":
+				if (self.developerMode) { console.log(self.name + ": watchHandler(): Button \"" + r.name + "\" tripple release."); }
+				break;
+			case "LONG_PRESS":
+				if (self.developerMode) { console.log(self.name + ": watchHandler(): Button \"" + r.name + "\" long press."); }
+				if (self.developerMode) { console.log(self.name + ": watchHandler(): Button \"" + r.name + "\" long press alert cleared."); }
+				break;
+			case "LONG_RELEASE":
+				if (self.developerMode) { console.log(self.name + ": watchHandler(): Button \"" + r.name + "\" long release."); }
+				break;
+			case "LONG_PRESS_ALERT":
+				r.longPressAlertIsActive = true;
+				if (self.developerMode) { console.log(self.name + ": watchHandler(): Button \"" + r.name + "\" long press alert triggered."); }
+				break;
+			case "LONG_PRESS_ALERT_CLEAR":
+				r.longPressAlertIsActive = false;
+				if (self.developerMode) { console.log(self.name + ": watchHandler(): Button \"" + r.name + "\" long press alert cleared."); }
+				break;
+		}*/
 	},
 	
 	/**
@@ -195,7 +351,12 @@ module.exports = NodeHelper.create({
 				default: return false;
 			}
 		} else if (resource.type === "BTN") {
-			return false;
+			if (self.buttonActions.includes(payload.action)) {
+				self.buttonPressHandler(payload.name, payload.action);
+				return true;
+			} else {
+				return false;
+			}
 		} else {
 			return false;
 		}
@@ -211,7 +372,7 @@ module.exports = NodeHelper.create({
 	 */
 	getHandler: function(req, res) {
 		var self = this;
-		var output, resource;
+		var output;
 		var payload = url.parse(req.url, true).query;
 		
 		if (self.developerMode) { console.log(self.name + ": getHandler(): " + JSON.stringify(payload)); }
@@ -439,7 +600,8 @@ module.exports = NodeHelper.create({
 	 */
 	stop: function() {
 		var self = this;
-		//exec("sudo pkill " + self.processName, { timeout: 1500 }, function(error, stdout, stderr) { });
+		console.log(self.name + ": Stopping module helper. ");
+		// Stop the pi-blaster instance that is running
 		if (self.initializedLED) {
 			exec("sudo pkill " + self.processName, { timeout: 1500 }, function(error, stdout, stderr) { });
 		}
@@ -451,10 +613,11 @@ module.exports = NodeHelper.create({
 					//self.setLED(r.name, r.exitValue);
 				}
 			} else if (r.type === "OUT") {
-				if (self.developerMode) { console.log(self.name + ": stop(): Releasing resource: \"" + r.name + "\" pin: \"" + r.pin + "\". "); }
+				if (self.developerMode) { console.log(self.name + ": stop(): Releasing resource (Output): \"" + r.name + "\" pin: \"" + r.pin + "\". "); }
 				self.onoff[r.name].unexport();
 			} else if (r.type === "BTN") {
-				
+				if (self.developerMode) { console.log(self.name + ": stop(): Releasing resource (Button): \"" + r.name + "\" pin: \"" + r.pin + "\". "); }
+				self.onoff[r.name].unexport();
 			}
 		}
 	}

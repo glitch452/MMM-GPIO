@@ -23,10 +23,14 @@ Module.register("MMM-GPIO", {
 		buttons: [],
 		outputs: [],
 		pinScheme: "BCMv2",
+		activeLow: false,
 		debounceTimeout: 10,
+		multiPressTimeout: 350,
+		longPressTime: 3000,
+		clearAlertOnRelease: false,
 		scriptPath: null, // Set in self.start() becuase access to self.data.path is needed
 		
-		developerMode: false,
+		developerMode: false
 	},
 	
 	/**
@@ -40,7 +44,7 @@ Module.register("MMM-GPIO", {
 	 */
 	start: function() {
 		var self = this;
-		var i, resource, pin;
+		var i;
 		self.instanceID = self.identifier + "_" + Math.random().toString().substring(2);
 		self.defaults.scriptPath = self.data.path + "pi-blaster";
 		self.resources = {};
@@ -80,7 +84,11 @@ Module.register("MMM-GPIO", {
 		if (!axis.isArray(self.config.leds)) { self.config.leds = self.defaults.leds; }
 		if (!self.validPinSchemes.includes(self.config.pinScheme)) { self.config.pinScheme = self.defaults.pinScheme; }
 		if (!axis.isBoolean(self.config.developerMode)) { self.config.developerMode = self.defaults.developerMode; }
-		if (!axis.isNumber(self.config.debounceTimeout) || isNaN(self.config.debounceTimeout) || self.config.debounceTimeout < 1 ) { self.config.debounceTimeout = self.defaults.debounceTimeout; }
+		if (!axis.isBoolean(self.config.activeLow)) { self.config.activeLow = self.defaults.activeLow; }
+		if (!axis.isBoolean(self.config.clearAlertOnRelease)) { self.config.clearAlertOnRelease = self.defaults.clearAlertOnRelease; }
+		if (!axis.isNumber(self.config.debounceTimeout) || isNaN(self.config.debounceTimeout) || self.config.debounceTimeout < 0 ) { self.config.debounceTimeout = self.defaults.debounceTimeout; }
+		if (!axis.isNumber(self.config.multiPressTimeout) || isNaN(self.config.multiPressTimeout) || self.config.multiPressTimeout < 0 ) { self.config.multiPressTimeout = self.defaults.multiPressTimeout; }
+		if (!axis.isNumber(self.config.longPressTime) || isNaN(self.config.longPressTime) || self.config.longPressTime < 0 ) { self.config.longPressTime = self.defaults.longPressTime; }
 		
 		// Loop through the provided configurations and add valid ones to the resources
 		for (i = 0; i < self.config.leds.length; i++) { self.addResource("LED", self.config.leds[i]); }
@@ -152,7 +160,7 @@ Module.register("MMM-GPIO", {
 			else if (resource.exitValue < 0) { resource.exitValue = 0; }
 			else if (resource.exitValue > 1) { resource.exitValue = 1; }
 			
-			if (!axis.isBoolean(resource.activeLow)) { resource.activeLow = false; }
+			if (!axis.isBoolean(resource.activeLow)) { resource.activeLow = self.config.activeLow; }
 			
 			result.value = resource.value;
 			result.exitValue = resource.exitValue;
@@ -161,15 +169,23 @@ Module.register("MMM-GPIO", {
 			result.type = "OUT";
 			
 			if (resource.value !== 0 && resource.value !== 1) { resource.value = 0; }
-			if (!axis.isBoolean(resource.activeLow)) { resource.activeLow = false; }
+			if (!axis.isBoolean(resource.activeLow)) { resource.activeLow = self.config.activeLow; }
 			
 			result.value = resource.value;
 			result.activeLow = resource.activeLow;
 		} else if (type === "BTN") {
 			result.type = "BTN";
 			
-			if (!axis.isBoolean(resource.activeLow)) { resource.activeLow = false; }
+			if (!axis.isBoolean(resource.clearAlertOnRelease)) { resource.clearAlertOnRelease = self.config.clearAlertOnRelease; }
+			if (!axis.isNumber(resource.debounceTimeout) || isNaN(resource.debounceTimeout) || resource.debounceTimeout < 0 ) { resource.debounceTimeout = self.config.debounceTimeout; }
+			if (!axis.isNumber(resource.multiPressTimeout) || isNaN(resource.multiPressTimeout) || resource.multiPressTimeout < 0 ) { resource.multiPressTimeout = self.config.multiPressTimeout; }
+			if (!axis.isNumber(resource.longPressTime) || isNaN(resource.longPressTime) || resource.longPressTime < 0 ) { resource.longPressTime = self.config.longPressTime; }
+			if (!axis.isBoolean(resource.activeLow)) { resource.activeLow = self.config.activeLow; }
 			
+			result.clearAlertOnRelease = resource.clearAlertOnRelease;
+			result.debounceTimeout = resource.debounceTimeout;
+			result.multiPressTimeout = resource.multiPressTimeout;
+			result.longPressTime = resource.longPressTime + resource.multiPressTimeout;
 			result.activeLow = resource.activeLow;
 		}
 		
