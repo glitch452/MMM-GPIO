@@ -208,7 +208,7 @@ module.exports = NodeHelper.create({
 					}, r.multiPressTimeout);		
 					// Set timeout for the long press alert action trigger
 					self.buttonTimeouts[r.longPressAlertID] = setTimeout(function(){
-						self.buttonPressHandler(r.name, "LONG_PRESS_ALERT");
+						self.triggerAlert(r.name);
 					}, r.multiPressTimeout);
 				} else if (r.pressCount === 2) {
 					clearTimeout(self.buttonTimeouts[r.pressID]);
@@ -220,10 +220,8 @@ module.exports = NodeHelper.create({
 				} else if (r.pressCount === 3) {
 					clearTimeout(self.buttonTimeouts[r.pressID]);
 					clearTimeout(self.buttonTimeouts[r.releaseID]);
-					self.buttonTimeouts[r.pressID] = setTimeout(function(){
-						self.buttonPressHandler(r.name, "TRIPPLE_PRESS");
-						r.pressCount = 0;
-					}, r.multiPressTimeout);
+					self.buttonPressHandler(r.name, "TRIPPLE_PRESS");
+					r.pressCount = 0;
 				}
 			} else if (value === 0 && r.isPressed) {
 				r.isPressed = false;
@@ -235,26 +233,49 @@ module.exports = NodeHelper.create({
 				if (r.releaseCount === 0) {
 					self.buttonPressHandler(r.name, "LONG_RELEASE");
 				} else if (r.releaseCount === 1) {
-					self.buttonTimeouts[r.releaseID] = setTimeout(function(){
-						// If a long-press alert was triggered, clear it, otherwise trigger the release action
-						if (r.longPressAlertIsActive) { self.buttonPressHandler(r.name, "LONG_PRESS_ALERT_CLEAR"); }
-						else { self.buttonPressHandler(r.name, "RELEASE"); }
+					// If a long-press alert was triggered, clear it, otherwise trigger the release action timeout
+					if (r.longPressAlertIsActive) {
+						self.clearAlert(r.name);
 						r.releaseCount = 0;
-					}, r.multiPressTimeout);
+					} else {
+						self.buttonTimeouts[r.releaseID] = setTimeout(function(){
+							self.buttonPressHandler(r.name, "RELEASE");
+							r.releaseCount = 0;
+						}, r.multiPressTimeout);
+					}
 				} else if (r.releaseCount === 2) {
 					self.buttonTimeouts[r.releaseID] = setTimeout(function(){
 						self.buttonPressHandler(r.name, "DOUBLE_RELEASE");
 						r.releaseCount = 0;
 					}, r.multiPressTimeout);
 				} else if (r.releaseCount === 3) {
-					self.buttonTimeouts[r.releaseID] = setTimeout(function(){
-						self.buttonPressHandler(r.name, "TRIPPLE_RELEASE");
-						r.releaseCount = 0;
-					}, r.multiPressTimeout);
+					self.buttonPressHandler(r.name, "TRIPPLE_RELEASE");
+					r.releaseCount = 0;
 				}
 			}
 			
 		};
+	},
+	
+	triggerAlert: function(name) {
+		var self = this;
+		var r = self.resources[name];
+		if (!axis.isNull(r.longPressAlert)) {
+			var payload = { message: r.longPressAlert.message };
+			if (!axis.isNull(r.longPressAlert.title)) { payload.title = r.longPressAlert.title; }
+			if (!axis.isNull(r.longPressAlert.imageFA)) { payload.imageFA = r.longPressAlert.imageFA; }
+			r.longPressAlertIsActive = true;
+			self.sendSocketNotification("NOTIFY", { notification: "SHOW_ALERT", payload: payload });
+		}
+	},
+	
+	clearAlert: function(name) {
+		var self = this;
+		var r = self.resources[name];
+		if (r.longPressAlertIsActive) {
+			r.longPressAlertIsActive = false;
+			self.sendSocketNotification("NOTIFY", { notification: "HIDE_ALERT" });
+		}
 	},
 	
 	/**
@@ -266,52 +287,23 @@ module.exports = NodeHelper.create({
 	buttonPressHandler: function(name, type) {
 		var self = this;
 		var r = self.resources[name];
+		var i, action;
 		
-		if (self.developerMode) { console.log(self.name + ": watchHandler(): Button \"" + r.name + "\"  Action: \"" + type + "\""); }
+		if (self.developerMode) { console.log(self.name + ": buttonPressHandler(): Button \"" + r.name + "\"  Action: \"" + type + "\""); }
 		
-		
-		if (type === "LONG_PRESS_ALERT") {
-			r.longPressAlertIsActive = true;
-		} else if (type === "LONG_PRESS_ALERT_CLEAR") {
-			r.longPressAlertIsActive = false;
+		if ((type === "LONG_PRESS" && !r.clearAlertOnRelease) || (type === "LONG_RELEASE" && r.clearAlertOnRelease)) {
+			self.clearAlert(r.name);
 		}
 		
-		/*
-		switch (type) {
-			case "PRESS":
-				if (self.developerMode) { console.log(self.name + ": watchHandler(): Button \"" + r.name + "\" single press."); }
-				break;
-			case "DOUBLE_PRESS":
-				if (self.developerMode) { console.log(self.name + ": watchHandler(): Button \"" + r.name + "\" double press."); }
-				break;
-			case "TRIPPLE_PRESS":
-				if (self.developerMode) { console.log(self.name + ": watchHandler(): Button \"" + r.name + "\" tripple press."); }
-				break;
-			case "RELEASE":
-				if (self.developerMode) { console.log(self.name + ": watchHandler(): Button \"" + r.name + "\" single release."); }
-				break;
-			case "DOUBLE_RELEASE":
-				if (self.developerMode) { console.log(self.name + ": watchHandler(): Button \"" + r.name + "\" double release."); }
-				break;
-			case "TRIPPLE_RELEASE":
-				if (self.developerMode) { console.log(self.name + ": watchHandler(): Button \"" + r.name + "\" tripple release."); }
-				break;
-			case "LONG_PRESS":
-				if (self.developerMode) { console.log(self.name + ": watchHandler(): Button \"" + r.name + "\" long press."); }
-				if (self.developerMode) { console.log(self.name + ": watchHandler(): Button \"" + r.name + "\" long press alert cleared."); }
-				break;
-			case "LONG_RELEASE":
-				if (self.developerMode) { console.log(self.name + ": watchHandler(): Button \"" + r.name + "\" long release."); }
-				break;
-			case "LONG_PRESS_ALERT":
-				r.longPressAlertIsActive = true;
-				if (self.developerMode) { console.log(self.name + ": watchHandler(): Button \"" + r.name + "\" long press alert triggered."); }
-				break;
-			case "LONG_PRESS_ALERT_CLEAR":
-				r.longPressAlertIsActive = false;
-				if (self.developerMode) { console.log(self.name + ": watchHandler(): Button \"" + r.name + "\" long press alert cleared."); }
-				break;
-		}*/
+		var actions = r[type];
+		for (i = 0; i < actions.length; i++) {
+			action = actions[i];
+			if (action.action === "NOTIFY") {
+				self.sendSocketNotification("NOTIFY", { notification: action.notification, payload: action.payload });
+			} else {
+				self.actionHandler(action);
+			}
+		}
 	},
 	
 	/**
@@ -609,9 +601,7 @@ module.exports = NodeHelper.create({
 		for(var i = 0; i < resourceList.length; i++) {
 			var r = resourceList[i];
 			if (r.type === "LED") {
-				if (!axis.isNull(r.exitValue)) {
-					//self.setLED(r.name, r.exitValue);
-				}
+				//if (!axis.isNull(r.exitValue)) { self.setLED(r.name, r.exitValue); }
 			} else if (r.type === "OUT") {
 				if (self.developerMode) { console.log(self.name + ": stop(): Releasing resource (Output): \"" + r.name + "\" pin: \"" + r.pin + "\". "); }
 				self.onoff[r.name].unexport();

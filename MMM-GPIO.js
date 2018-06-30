@@ -24,8 +24,8 @@ Module.register("MMM-GPIO", {
 		outputs: [],
 		pinScheme: "BCMv2",
 		activeLow: false,
-		debounceTimeout: 10,
-		multiPressTimeout: 350,
+		debounceTimeout: 15,
+		multiPressTimeout: 400,
 		longPressTime: 3000,
 		clearAlertOnRelease: false,
 		scriptPath: null, // Set in self.start() becuase access to self.data.path is needed
@@ -79,6 +79,17 @@ Module.register("MMM-GPIO", {
 			{ "BOARD": 7, "BCMv1": 4, "BCMv2": 4, "WPI": 7 },
 			{ "BOARD": 8, "BCMv1": 14, "BCMv2": 14, "WPI": 15 }
 		];
+		self.triggerActionMapping = {
+			onPress: "PRESS",
+			onRelease: "RELEASE",
+			onDoublePress: "DOUBLE_PRESS",
+			onDoubleRelease: "DOUBLE_RELEASE",
+			onTripplePress: "TRIPPLE_PRESS",
+			onTrippleRelease: "TRIPPLE_RELEASE",
+			onLongPress: "LONG_PRESS",
+			onLongRelease: "LONG_RELEASE",
+		};
+		self.validTriggers = Object.keys(self.triggerActionMapping);
 		
 		if (!axis.isString(self.config.scriptPath) || self.config.scriptPath.length < 1 ) { self.config.scriptPath = self.defaults.scriptPath; }
 		if (!axis.isArray(self.config.leds)) { self.config.leds = self.defaults.leds; }
@@ -97,6 +108,7 @@ Module.register("MMM-GPIO", {
 		
 		self.log(("start(): self.data: " + JSON.stringify(self.data)), "dev");
 		self.log(("start(): self.config: " + JSON.stringify(self.config)), "dev");
+		self.log(("start(): self.resources: " + JSON.stringify(self.resources)), "dev");
 		
 		self.sendSocketNotification("INIT", {
 			instanceID: self.instanceID,
@@ -116,7 +128,7 @@ Module.register("MMM-GPIO", {
 	 */
 	addResource: function(type, resource) {
 		var self = this;
-		var pin, typeFull;
+		var i, k, pin, typeFull, triggerName, actionName, actions, action;
 		
 		switch (type) {
 			case "LED": typeFull = "LED"; break;
@@ -182,6 +194,34 @@ Module.register("MMM-GPIO", {
 			if (!axis.isNumber(resource.longPressTime) || isNaN(resource.longPressTime) || resource.longPressTime < 0 ) { resource.longPressTime = self.config.longPressTime; }
 			if (!axis.isBoolean(resource.activeLow)) { resource.activeLow = self.config.activeLow; }
 			
+			if (axis.isObject(resource.longPressAlert) && axis.isString(resource.longPressAlert.message)) {
+				result.longPressAlert = { message: resource.longPressAlert.message, title: null, imageFA: null };
+				if (axis.isString(resource.longPressAlert.title)) { result.longPressAlert.title = resource.longPressAlert.title; }
+				if (axis.isString(resource.longPressAlert.imageFA)) { result.longPressAlert.imageFA = resource.longPressAlert.imageFA; }
+			} else {
+				result.longPressAlert = null;
+			}
+			
+			for (i = 0; i < self.validTriggers.length; i++) {
+				triggerName = self.validTriggers[i];
+				actionName = self.triggerActionMapping[triggerName];
+				result[actionName] = [];
+				actions = resource[triggerName];
+				if (axis.isUndefined(actions)) { continue; }
+				else if (!axis.isArray(actions)) { actions = [ actions ]; }
+				
+				for (k = 0; k < actions.length; k++) {
+					action = actions[k];
+					if (!axis.isString(action.action)) { continue; }
+					if (action.action === "NOTIFY") {
+						if (!axis.isString(action.notification)) { continue; }
+					} else {
+						if (!axis.isString(action.name)) { continue; }
+					}
+					result[actionName].push(action);
+				}
+			}
+			
 			result.clearAlertOnRelease = resource.clearAlertOnRelease;
 			result.debounceTimeout = resource.debounceTimeout;
 			result.multiPressTimeout = resource.multiPressTimeout;
@@ -221,10 +261,12 @@ Module.register("MMM-GPIO", {
 		var self = this;
 		
 		// If there is no module ID sent with the notification
-		if (!axis.isString(payload.original.instanceID)) {
+		if (!axis.isObject(payload.original) || !axis.isString(payload.original.instanceID)) {
 			if (notification === "LOG") {
 				if (payload.translate) { self.log(self.translate(payload.message, payload.translateVars), payload.logType); }
 				else { self.log(payload.message, payload.logType); }
+			} else if (notification === "NOTIFY") {
+				self.sendNotification(payload.notification, payload.payload);
 			}
 			return;
 		}
