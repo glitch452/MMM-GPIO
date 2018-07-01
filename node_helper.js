@@ -10,13 +10,11 @@
  * Load resources required by this module.  
  */
 var NodeHelper = require("node_helper");
-//var stringify = require("json-stringify-safe");
 const url = require("url");
 var axis = require("axis.js");
 const exec = require("child_process").exec;
 const Gpio = require('onoff').Gpio;
 var piBlaster = require("pi-blaster.js");
-
 
 /**
  * Use NodeHelper to create a module.  
@@ -74,7 +72,6 @@ module.exports = NodeHelper.create({
 	 */
 	initializeResources: function(payload) {
 		var self = this;
-		var i, r;
 		var resourceList = Object.values(payload.resources);
 		if (self.initializedLED || self.initializedOnOff) {
 			self.sendSocketNotification("LOG", { original: payload, message: ("node_helper.js has already been initialized."), messageType: "dev" } );
@@ -83,15 +80,11 @@ module.exports = NodeHelper.create({
 			self.developerMode = payload.developerMode;
 			self.resources = payload.resources;
 			var pinListLED = [];
-			for (i = 0; i < resourceList.length; i++) {
-				r = resourceList[i];
-				if (r.type === "LED") {
-					pinListLED.push(r.pin);
-				}
+			for (var i = 0; i < resourceList.length; i++) {
+				if (resourceList[i].type === "LED") { pinListLED.push(resourceList[i].pin); }
 			}
 			if (pinListLED.length > 0) { self.startPiBlaster(payload.scriptPath, pinListLED.join(",")); }
 			else { self.initOnOff(); }
-			
 		} else {
 			self.sendSocketNotification("LOG", { original: payload, message: ("Unable to initialize node_helper.js.  No resources have been defined. "), messageType: "dev" } );
 		}
@@ -130,11 +123,12 @@ module.exports = NodeHelper.create({
 	 */
 	setInitialValues: function() {
 		var self = this;
-		var resourceList = Object.values(self.resources);
+		var resourceList = Object.keys(self.resources);
 		self.initializedLED = true;
-		for(var i = 0; i < resourceList.length; i++) {
-			if (resourceList[i].type === "LED") {
-				self.setLED(resourceList[i].name, resourceList[i].value);
+		for (var i = 0; i < resourceList.length; i++) {
+			var r = self.resources[resourceList[i]];
+			if (r.type === "LED") {
+				self.setLED(r, r.value);
 			}
 		}
 	},
@@ -149,15 +143,19 @@ module.exports = NodeHelper.create({
 		self.sendSocketNotification("LOG", { original: null, message: ("Initializing Buttons and/or Outputs.") } );
 		console.log(self.name + ": Initializing Buttons and/or Outputs.");
 		
-		var resourceList = Object.values(self.resources);
+		var resourceList = Object.keys(self.resources);
 		for (i = 0; i < resourceList.length; i++) {
-			r = resourceList[i];
+			r = self.resources[resourceList[i]];
 			if (r.type === "OUT") {
 				if (self.developerMode) { console.log(self.name + ": Initializing resource (Output) \"" + r.name + "\" on pin \"" + r.pin + "\"."); }
 				self.initializedOnOff = true;
 				self.onoff[r.name] = new Gpio(r.pin, "out");
-				self.setOUT(r.name, r.value);
+				self.setOUT(r, r.value);
 			} else if (r.type === "BTN") {
+				if (r.numShortPress < 1 && !r.enableLongPress) {
+					if (self.developerMode) { console.log(self.name + ": Not Initializing resource (Button) \"" + r.name + "\" on pin \"" + r.pin + "\".  No actions are assigned."); }
+					continue;
+				}
 				if (self.developerMode) { console.log(self.name + ": Initializing resource (Button) \"" + r.name + "\" on pin \"" + r.pin + "\"."); }
 				self.initializedOnOff = true;
 				r.pressCount = 0;
@@ -173,7 +171,8 @@ module.exports = NodeHelper.create({
 				// Create onoff object
 				self.onoff[r.name] = new Gpio(r.pin, "in", "both", options);
 				// Add the interrupt callback
-				self.onoff[r.name].watch(self.watchHandler(r.name));
+				self.onoff[r.name].watch(self.watchHandler(r));
+				
 			}
 		}
 	},
@@ -181,57 +180,77 @@ module.exports = NodeHelper.create({
 	/**
 	 * The watchHandler function handles iunterrupt events for buttons
 	 * 
-	 * @param name (string) The name of the button being watched
+	 * @param r (object) The resource object
 	 */
-	watchHandler: function(name) {
+	watchHandler: function(r) {
 		var self = this;
-		var r = self.resources[name];
 		
 		return function (err, value) {
 			
 			if (err) {
-				if (self.developerMode) { console.log(self.name + ": watchHandler(): \"" + name + "\" error: \"" + JSON.stringify(err) + "\""); }
+				if (self.developerMode) { console.log(self.name + ": watchHandler(): \"" + r.name + "\" error: \"" + JSON.stringify(err) + "\""); }
 				return;
 			}
 			
 			if (value === 1 && !r.isPressed) {
+				var triggerPress;
 				r.isPressed = true;
 				r.pressCount++;
 				
 				if (r.pressCount === 1) {
+					
 					r.releaseCount = 1;
-					// Set timeout for the long press action trigger
-					self.buttonTimeouts[r.longPressID] = setTimeout(function(){
+					
+					triggerPress = function() {
 						r.pressCount = 0;
-						r.releaseCount = 4;
-						self.buttonPressHandler(r.name, "LONG_PRESS");
-					}, r.longPressTime + r.multiPressTimeout);
-					// Set timeout for the regular press action trigger
-					self.buttonTimeouts[r.pressID] = setTimeout(function(){
-						r.pressCount = 0;
-						self.buttonPressHandler(r.name, "PRESS");
-					}, r.multiPressTimeout);		
-					// Set timeout for the long press alert action trigger
-					if (!axis.isNull(r.longPressAlert)) {
-						self.buttonTimeouts[r.longPressAlertID] = setTimeout(function(){
-							self.triggerAlert(r.name);
-						}, r.multiPressTimeout);
+						self.buttonPressHandler(r, "PRESS");
+					};
+					
+					if (r.numShortPress === 1) { triggerPress(); }
+					else if (r.numShortPress > 1) { self.buttonTimeouts[r.pressID] = setTimeout(triggerPress, r.multiPressTimeout); }
+					else { r.pressCount = r.releaseCount = 0; }
+					
+					if (r.enableLongPress) {
+						
+						self.buttonTimeouts[r.longPressID] = setTimeout(function(){
+							r.releaseCount = 4;
+							self.buttonPressHandler(r, "LONG_PRESS");
+						}, r.longPressTime + r.multiPressTimeout);
+						
+						if (!axis.isNull(r.longPressAlert)) {
+							self.buttonTimeouts[r.longPressAlertID] = setTimeout(function(){
+								r.releaseCount = 0;
+								self.triggerAlert(r);
+							}, r.multiPressTimeout);
+						}
+						
 					}
+					
 				} else if (r.pressCount === 2) {
+					
+					clearTimeout(self.buttonTimeouts[r.pressID]);
+					clearTimeout(self.buttonTimeouts[r.releaseID]);
+					
 					r.releaseCount = 2;
-					clearTimeout(self.buttonTimeouts[r.pressID]);
-					clearTimeout(self.buttonTimeouts[r.releaseID]);
-					self.buttonTimeouts[r.pressID] = setTimeout(function(){
+					
+					triggerPress = function() {
 						r.pressCount = 0;
-						self.buttonPressHandler(r.name, "DOUBLE_PRESS");
-					}, r.multiPressTimeout);
+						self.buttonPressHandler(r, "DOUBLE_PRESS");
+					};
+					
+					if (r.numShortPress === 2) { triggerPress(); }
+					else if (r.numShortPress > 2) { self.buttonTimeouts[r.pressID] = setTimeout(triggerPress, r.multiPressTimeout); }
+					
 				} else if (r.pressCount === 3) {
-					r.releaseCount = 3;
+					
 					clearTimeout(self.buttonTimeouts[r.pressID]);
 					clearTimeout(self.buttonTimeouts[r.releaseID]);
+					r.releaseCount = 3;
 					r.pressCount = 0;
-					self.buttonPressHandler(r.name, "TRIPPLE_PRESS");
+					self.buttonPressHandler(r, "TRIPPLE_PRESS");
+					
 				}
+				
 			} else if (value === 0 && r.isPressed) {
 				r.isPressed = false;
 				
@@ -239,31 +258,36 @@ module.exports = NodeHelper.create({
 				clearTimeout(self.buttonTimeouts[r.longPressAlertID]);
 				
 				if (r.releaseCount === 1) {
-					// If a long-press alert was triggered, clear it, otherwise trigger the release action timeout
-					if (r.longPressAlertIsActive) {
-						self.clearAlert(r.name);
+					if (r.numShortPress === 1) {
+						self.buttonPressHandler(r, "RELEASE");
 					} else {
-						self.buttonTimeouts[r.releaseID] = setTimeout(function(){
-							self.buttonPressHandler(r.name, "RELEASE");
-						}, r.multiPressTimeout);
+						self.buttonTimeouts[r.releaseID] = setTimeout(function(){ self.buttonPressHandler(r, "RELEASE"); }, r.multiPressTimeout);
 					}
 				} else if (r.releaseCount === 2) {
-					self.buttonTimeouts[r.releaseID] = setTimeout(function(){
-						self.buttonPressHandler(r.name, "DOUBLE_RELEASE");
-					}, r.multiPressTimeout);
+					if (r.numShortPress === 2) {
+						self.buttonPressHandler(r, "DOUBLE_RELEASE");
+					} else {
+						self.buttonTimeouts[r.releaseID] = setTimeout(function(){ self.buttonPressHandler(r, "DOUBLE_RELEASE"); }, r.multiPressTimeout);
+					}
 				} else if (r.releaseCount === 3) {
-					self.buttonPressHandler(r.name, "TRIPPLE_RELEASE");
+					self.buttonPressHandler(r, "TRIPPLE_RELEASE");
 				} else if (r.releaseCount === 4) {
-					self.buttonPressHandler(r.name, "LONG_RELEASE");
-				}
+					self.buttonPressHandler(r, "LONG_RELEASE");
+				} else {
+					self.clearAlert(r);
+				} 
 			}
 			
 		};
 	},
 	
-	triggerAlert: function(name) {
+	/**
+	 * The triggerAlert function initiates the Long Press Alert for the given resource
+	 * 
+	 * @param r (object) The resource object
+	 */
+	triggerAlert: function(r) {
 		var self = this;
-		var r = self.resources[name];
 		if (!axis.isNull(r.longPressAlert)) {
 			var payload = { message: r.longPressAlert.message };
 			if (!axis.isNull(r.longPressAlert.title)) { payload.title = r.longPressAlert.title; }
@@ -273,9 +297,13 @@ module.exports = NodeHelper.create({
 		}
 	},
 	
-	clearAlert: function(name) {
+	/**
+	 * The clearAlert function clears the Long Press Alert for the given resource (if it is active)
+	 * 
+	 * @param r (object) The resource object
+	 */
+	clearAlert: function(r) {
 		var self = this;
-		var r = self.resources[name];
 		if (r.longPressAlertIsActive) {
 			r.longPressAlertIsActive = false;
 			self.sendSocketNotification("NOTIFY", { notification: "HIDE_ALERT" });
@@ -285,27 +313,26 @@ module.exports = NodeHelper.create({
 	/**
 	 * The buttonPressHandler function triggers actions associated to button presses
 	 * 
-	 * @param name (string) The name of the button being pressed
-	 * @param type (string) The type of the press being triggered
+	 * @param r (object) The resource object
+	 * @param actionName (string) The type of the action being triggered
 	 */
-	buttonPressHandler: function(name, type) {
+	buttonPressHandler: function(r, actionName) {
 		var self = this;
-		var r = self.resources[name];
-		var i, action;
+		var i, payload;
 		
-		if (self.developerMode) { console.log(self.name + ": buttonPressHandler(): Button \"" + r.name + "\"  Action: \"" + type + "\""); }
+		if (self.developerMode) { console.log(self.name + ": buttonPressHandler(): Button \"" + r.name + "\"  Action: \"" + actionName + "\""); }
 		
-		if ((type === "LONG_PRESS" && !r.clearAlertOnRelease) || (type === "LONG_RELEASE" && r.clearAlertOnRelease)) {
-			self.clearAlert(r.name);
+		if ((actionName === "LONG_PRESS" && !r.clearAlertOnRelease) || (actionName === "LONG_RELEASE" && r.clearAlertOnRelease)) {
+			self.clearAlert(r);
 		}
 		
-		var actions = r[type];
+		var actions = r[actionName];
 		for (i = 0; i < actions.length; i++) {
-			action = actions[i];
-			if (action.action === "NOTIFY") {
-				self.sendSocketNotification("NOTIFY", { notification: action.notification, payload: action.payload });
+			payload = actions[i];
+			if (payload.action === "NOTIFY") {
+				self.sendSocketNotification("NOTIFY", payload);
 			} else {
-				self.actionHandler(action);
+				self.actionHandler(payload);
 			}
 		}
 	},
@@ -314,42 +341,42 @@ module.exports = NodeHelper.create({
 	 * The actionHandler function handles led actions received from various sources
 	 * 
 	 * @param payload (object) Contains the action parameters
+	 * @return (boolean) returns true if a valid action was requested, false otherwise
 	 */
 	actionHandler: function(payload) {
 		var self = this;
 		
 		if (self.developerMode) { console.log(self.name + ": actionHandler(): " + JSON.stringify(payload)); }
 		
-		var resource = self.resources[payload.name];
-		if (axis.isUndefined(resource)) {
-			 console.log(self.name + ": actionHandler(): There is no resource assigned to the name: \"" + payload.name + "\"."	);
+		var r = self.resources[payload.name];
+		if (axis.isUndefined(r)) {
+			 console.log(self.name + ": actionHandler(): There is no resource assigned to the name: \"" + payload.name + "\"." );
 			 return false;
 		}
 		if (!axis.isString(payload.action)) { return false; }
 		payload.action = payload.action.toUpperCase();
 		
-		if (resource.type === "LED") {
-			self.clearAnimation(payload.name);
+		if (r.type === "LED") {
+			self.clearAnimation(r);
 			switch (payload.action) {
-				case "SET": self.setLED(payload.name, payload.value); break;
-				case "INCREASE": self.increaseLED(payload.name, payload.value); break;
-				case "DECREASE": self.decreaseLED(payload.name, payload.value); break;
-				case "TOGGLE": self.toggleLED(payload.name, payload.value); break;
-				case "BLINK": self.blinkLED(payload.name, payload.time, payload.offTime, payload.value); break;
+				case "SET": self.setLED(r, payload.value); break;
+				case "INCREASE": self.increaseLED(r, payload.value); break;
+				case "DECREASE": self.decreaseLED(r, payload.value); break;
+				case "TOGGLE": self.toggleLED(r, payload.value); break;
+				case "BLINK": self.blinkLED(r, payload.time, payload.offTime, payload.value); break;
 				default: return false;
 			}
-		} else if (resource.type === "OUT") {
-			self.clearAnimation(payload.name);
+		} else if (r.type === "OUT") {
+			self.clearAnimation(r);
 			switch (payload.action) {
-				case "SET": self.setOUT(payload.name, payload.value); break;
-				case "TOGGLE": self.toggleOUT(payload.name, payload.value); break;
-				case "BLINK": self.blinkOUT(payload.name, payload.time, payload.offTime, payload.value); break;
+				case "SET": self.setOUT(r, payload.value); break;
+				case "TOGGLE": self.toggleOUT(r, payload.value); break;
+				case "BLINK": self.blinkOUT(r, payload.time, payload.offTime, payload.value); break;
 				default: return false;
 			}
-		} else if (resource.type === "BTN") {
+		} else if (r.type === "BTN") {
 			if (self.buttonActions.includes(payload.action)) {
-				self.buttonPressHandler(payload.name, payload.action);
-				return true;
+				self.buttonPressHandler(r, payload.action);
 			} else {
 				return false;
 			}
@@ -361,7 +388,7 @@ module.exports = NodeHelper.create({
 	},
 	
 	/**
-	 * The getHandler function handles 'get' requests sent to the browset
+	 * The getHandler function handles 'get' requests sent via a browser
 	 * 
 	 * @param req (object) Contains the request data
 	 * @param res (object) Contains the response data
@@ -374,7 +401,7 @@ module.exports = NodeHelper.create({
 		if (self.developerMode) { console.log(self.name + ": getHandler(): " + JSON.stringify(payload)); }
 		
 		if (axis.isUndefined(self.resources[payload.name])) {
-			res.send(JSON.stringify({ error: true, message: "There is no resource assigned to the name: \"" + payload.name + "\"."	}));
+			res.send(JSON.stringify({ error: true, message: "There is no resource assigned to the name: \"" + payload.name + "\"." }));
 		} else {
 			if (!axis.isString(payload.action)) {
 				res.send(JSON.stringify({ error: true, message: "The provided action must be a string." }));
@@ -399,28 +426,27 @@ module.exports = NodeHelper.create({
 	/**
 	 * The clearAnimation function clears any animation that might be runnig on a given resource.
 	 * 
-	 * @param name (string) The name of the resource to clear the animation for
+	 * @param r (object) The resource object
 	 */
-	clearAnimation: function(name) {
+	clearAnimation: function(r) {
 		var self = this;
-		if (!axis.isUndefined(self.resources[name])) {
-			clearTimeout(self.animations[name]);
-			delete self.animations[name];
+		if (axis.isObject(r)) {
+			clearTimeout(self.animations[r.name]);
+			delete self.animations[r.name];
 		}
 	},
 	
 	/**
 	 * The setOUT function sets the output value of a given resource.
 	 * 
-	 * @param name (string) The name of the resource to set
+	 * @param r (object) The resource object
 	 * @param value (number) The value to assign to the specified resource
 	 */
-	setOUT: function(name, value) {
+	setOUT: function(r, value) {
 		var self = this;
 		value = Number(value);
-		if (!self.initializedOnOff || axis.isUndefined(self.resources[name]) || (value !== 0 && value !== 1)) { return; }
-		var r = self.resources[name];
-		if (self.developerMode) { console.log(self.name + ": setOUT(): Name: \"" + name + "\" Pin: \"" + r.pin + "\" value: \"" + value + "\""); }
+		if (!self.initializedOnOff || (value !== 0 && value !== 1)) { return; }
+		if (self.developerMode) { console.log(self.name + ": setOUT(): Name: \"" + r.name + "\" Pin: \"" + r.pin + "\" value: \"" + value + "\""); }
 		var actualValue = value;
 		if (r.activeLow) { actualValue = value === 0 ? 1 : 0; }
 		
@@ -428,7 +454,7 @@ module.exports = NodeHelper.create({
 			if (!err) {
 				r.value = value;
 			} else if (self.developerMode) {
-				console.log(self.name + ": setOUT(): Unable to set resource \"" + name + "\" to value \"" + value + "\".  Error: \"" + JSON.stringify(err) + "\"");
+				console.log(self.name + ": setOUT(): Unable to set resource \"" + r.name + "\" to value \"" + value + "\".  Error: \"" + JSON.stringify(err) + "\"");
 			}
 		});
 	},
@@ -436,42 +462,39 @@ module.exports = NodeHelper.create({
 	/**
 	 * The toggleOUT function toggles the output on and off
 	 * 
-	 * @param name (string) The name of the resource to toggle
+	 * @param r (object) The resource object
 	 */
-	toggleOUT: function(name) {
+	toggleOUT: function(r) {
 		var self = this;
-		if (!self.initializedOnOff || axis.isUndefined(self.resources[name])) { return; }
-		var r = self.resources[name];
-		if (self.developerMode) { console.log(self.name + ": toggleOUT(): Name: \"" + name + "\"."); }
-		var value = r.value === 0 ? 1 : 0;
-		self.setOUT(name, value);
+		if (!self.initializedOnOff) { return; }
+		if (self.developerMode) { console.log(self.name + ": toggleOUT(): Name: \"" + r.name + "\"."); }
+		self.setOUT(r, (r.value === 0 ? 1 : 0));
 	},
 	
 	/**
 	 * The blinkOUT function toggles the output on and off
 	 * 
-	 * @param name (string) The name of the resource to blink
+	 * @param r (object) The resource object
 	 * @param time (number) The number of milliseconds to keep the output 'on'
 	 * @param offTime (number) The number of milliseconds to keep the output 'off'.  The time parameter is used if this is not provided.
 	 */
-	blinkOUT: function(name, time, offTime) {
+	blinkOUT: function(r, time, offTime) {
 		var self = this;
-		if (!self.initializedOnOff || axis.isUndefined(self.resources[name])) { return; }
+		if (!self.initializedOnOff) { return; }
 		time = Number(time);
 		offTime = Number(offTime);
 		if (!axis.isNumber(time) || isNaN(time) || time <= 0) { time = 750; }
 		if (!axis.isNumber(offTime) || isNaN(offTime) || offTime <= 0) { offTime = time; }
-		var r = self.resources[name];
 		var value = r.value === 0 ? 1 : 0;
 		
-		if (self.developerMode) { console.log(self.name + ": blinkOUT(): Name: \"" + name + "\" time: \"" + time + "\" offTime: \"" + offTime + "\""); }
+		if (self.developerMode) { console.log(self.name + ": blinkOUT(): Name: \"" + r.name + "\" time: \"" + time + "\" offTime: \"" + offTime + "\""); }
 		
 		var blink;
 		
 		blink = function() {
 			var blinkTime = offTime;
 			if (r.value === 0) { blinkTime = time; }
-			self.toggleOUT(name, value);
+			self.toggleOUT(r, value);
 			self.animations[r.name] = setTimeout(function(){ blink(); }, blinkTime);
 		};
 		
@@ -481,18 +504,17 @@ module.exports = NodeHelper.create({
 	/**
 	 * The setLED function sets the output value of an LED on a given pin.
 	 * 
-	 * @param ledName (string) The name of the resource to update
+	 * @param r (object) The resource object
 	 * @param value (number) The value to assign to the specified resource
 	 */
-	setLED: function(ledName, value) {
+	setLED: function(r, value) {
 		var self = this;
 		value = Number(value);
-		if (!self.initializedLED || axis.isUndefined(self.resources[ledName]) || !axis.isNumber(value) || isNaN(value)) { return; }
-		var r = self.resources[ledName];
+		if (!self.initializedLED || !axis.isNumber(value) || isNaN(value)) { return; }
 		if (value > 1) { value = 1; }
 		else if (value < 0) { value = 0; }
 		
-		if (self.developerMode) { console.log(self.name + ": setLED(): Name: \"" + ledName + "\" Pin: \"" + r.pin + "\" value: \"" + value + "\""); }
+		if (self.developerMode) { console.log(self.name + ": setLED(): Name: \"" + r.name + "\" Pin: \"" + r.pin + "\" value: \"" + value + "\""); }
 		
 		r.value = value;
 		if (r.activeLow) { value = 1 - value; }
@@ -502,89 +524,85 @@ module.exports = NodeHelper.create({
 	/**
 	 * The increaseLED function increases the value by the given amount
 	 * 
-	 * @param ledName (string) The name of the resource to update
+	 * @param r (object) The resource object
 	 * @param value (number) The value to increase the resource by
 	 */
-	increaseLED: function(ledName, value) {
+	increaseLED: function(r, value) {
 		var self = this;
 		value = Number(value);
-		if (!self.initializedLED || axis.isUndefined(self.resources[ledName])) { return; }
+		if (!self.initializedLED) { return; }
 		if (!axis.isNumber(value) || isNaN(value)) { value = 0.1; }
-		var r = self.resources[ledName];
 		
-		if (self.developerMode) { console.log(self.name + ": increaseLED(): Name: \"" + ledName + "\" value: \"" + value + "\""); }
+		if (self.developerMode) { console.log(self.name + ": increaseLED(): Name: \"" + r.name + "\" value: \"" + value + "\""); }
 		
-		self.setLED(ledName, r.value + value);
+		self.setLED(r, r.value + value);
 	},
 	
 	/**
 	 * The decreaseLED function decreases the value by the given amount
 	 * 
-	 * @param ledName (string) The name of the resource to update
+	 * @param r (object) The resource object
 	 * @param value (number) The value to decrease the resource by
 	 */
-	decreaseLED: function(ledName, value) {
+	decreaseLED: function(r, value) {
 		var self = this;
 		value = Number(value);
-		if (!self.initializedLED || axis.isUndefined(self.resources[ledName])) { return; }
+		if (!self.initializedLED) { return; }
 		if (!axis.isNumber(value) || isNaN(value)) { value = 0.1; }
-		var r = self.resources[ledName];
 		
-		if (self.developerMode) { console.log(self.name + ": decreaseLED(): Name: \"" + ledName + "\" value: \"" + value + "\""); }
+		if (self.developerMode) { console.log(self.name + ": decreaseLED(): Name: \"" + r.name + "\" value: \"" + value + "\""); }
 		
-		self.setLED(ledName, r.value - value);
+		self.setLED(r, r.value - value);
 	},
 	
 	/**
 	 * The toggleLED function toggles the LED on and off, using the last value as its on level
 	 * 
-	 * @param ledName (string) The name of the resource to update
+	 * @param r (object) The resource object
 	 * @param value (number) The brightness value use when turning the LED on.  The previously used value (or 1) will be used if this is not provided.
 	 */
-	toggleLED: function(ledName, value) {
+	toggleLED: function(r, value) {
 		var self = this;
-		if (!self.initializedLED || axis.isUndefined(self.resources[ledName])) { return; }
+		if (!self.initializedLED) { return; }
 		value = Number(value);
 		if (!axis.isNumber(value) || isNaN(value) || value <= 0 || value > 1) { value = null; }
-		var r = self.resources[ledName];
-		if (self.developerMode) { console.log(self.name + ": toggleLED(): Name: \"" + ledName + "\" value: \"" + value + "\""); }
+		if (self.developerMode) { console.log(self.name + ": toggleLED(): Name: \"" + r.name + "\" value: \"" + value + "\""); }
 		
 		if (r.value === 0) {
-			if (!axis.isNull(value)) { self.setLED(ledName, value); }
-			else if (axis.isUndefined(r.toggleValue)) { self.setLED(ledName, 1); }
-			else { self.setLED(ledName, r.toggleValue); }
+			if (!axis.isNull(value)) { self.setLED(r, value); }
+			else if (axis.isUndefined(r.toggleValue)) { self.setLED(r, 1); }
+			else { self.setLED(r, r.toggleValue); }
 		} else {
 			r.toggleValue = r.value;
-			self.setLED(ledName, 0);
+			self.setLED(r, 0);
 		}
 	},
 	
 	/**
 	 * The blinkLED function toggles the LED on and off, using the last value as its on level
 	 * 
-	 * @param ledName (string) The name of the resource to blink
+	 * @param r (object) The resource object
 	 * @param time (number) The number of milliseconds to keep the output 'on'
 	 * @param offTime (number) The number of milliseconds to keep the output 'off'.  The time parameter is used if this is not provided.
 	 * @param value (number) The brightness value to use for the 'on' duration
 	 */
-	blinkLED: function(ledName, time, offTime, value) {
+	blinkLED: function(r, time, offTime, value) {
 		var self = this;
-		if (!self.initializedLED || axis.isUndefined(self.resources[ledName])) { return; }
+		if (!self.initializedLED) { return; }
 		time = Number(time);
 		offTime = Number(offTime);
 		value = Number(value);
 		if (!axis.isNumber(time) || isNaN(time) || time <= 0) { time = 750; }
 		if (!axis.isNumber(offTime) || isNaN(offTime) || offTime <= 0) { offTime = time; }
 		if (!axis.isNumber(value) || isNaN(value) || value <= 0 || value > 1) { value = null; }
-		var r = self.resources[ledName];
-		if (self.developerMode) { console.log(self.name + ": blinkLED(): Name: \"" + ledName + "\" value: \"" + value + "\" time: \"" + time + "\" offTime: \"" + offTime + "\""); }
+		if (self.developerMode) { console.log(self.name + ": blinkLED(): Name: \"" + r.name + "\" value: \"" + value + "\" time: \"" + time + "\" offTime: \"" + offTime + "\""); }
 		
 		var blink;
 		
 		blink = function() {
 			var blinkTime = offTime;
 			if (r.value === 0) { blinkTime = time; }
-			self.toggleLED(ledName, value);
+			self.toggleLED(r, value);
 			self.animations[r.name] = setTimeout(function(){ blink(); }, blinkTime);
 		};
 		
@@ -597,19 +615,19 @@ module.exports = NodeHelper.create({
 	stop: function() {
 		var self = this;
 		console.log(self.name + ": Stopping module helper. ");
-		// Stop the pi-blaster instance that is running
+		// Stop the pi-blaster instance(s) that is/are running
 		if (self.initializedLED) {
 			exec("sudo pkill " + self.processName, { timeout: 1500 }, function(error, stdout, stderr) { });
 		}
 		var resourceList = Object.values(self.resources);
-		for(var i = 0; i < resourceList.length; i++) {
+		for (var i = 0; i < resourceList.length; i++) {
 			var r = resourceList[i];
 			if (r.type === "LED") {
 				//if (!axis.isNull(r.exitValue)) { self.setLED(r.name, r.exitValue); }
 			} else if (r.type === "OUT") {
 				if (self.developerMode) { console.log(self.name + ": stop(): Releasing resource (Output): \"" + r.name + "\" pin: \"" + r.pin + "\". "); }
 				self.onoff[r.name].unexport();
-			} else if (r.type === "BTN") {
+			} else if (r.type === "BTN" && !axis.isUndefined(self.onoff[r.name])) {
 				if (self.developerMode) { console.log(self.name + ": stop(): Releasing resource (Button): \"" + r.name + "\" pin: \"" + r.pin + "\". "); }
 				self.onoff[r.name].unexport();
 			}

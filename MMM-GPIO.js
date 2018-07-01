@@ -25,8 +25,8 @@ Module.register("MMM-GPIO", {
 		pinScheme: "BCMv2",
 		activeLow: false,
 		debounceTimeout: 8,
-		multiPressTimeout: 300,
-		longPressTime: 3000,
+		multiPressTimeout: 325,
+		longPressTime: 4000,
 		clearAlertOnRelease: false,
 		scriptPath: null, // Set in self.start() becuase access to self.data.path is needed
 		
@@ -113,7 +113,6 @@ Module.register("MMM-GPIO", {
 		self.sendSocketNotification("INIT", {
 			instanceID: self.instanceID,
 			scriptPath: self.config.scriptPath,
-			debounceTimeout: self.config.debounceTimeout,
 			resources: self.resources,
 			developerMode: self.config.developerMode
 		});
@@ -134,7 +133,7 @@ Module.register("MMM-GPIO", {
 			case "LED": typeFull = "LED"; break;
 			case "OUT": typeFull = "Output"; break;
 			case "BTN": typeFull = "Button"; break;
-			default: typeFull = "Unknown Type";
+			default: return;
 		}
 		
 		if (!axis.isString(resource.name) || resource.name.length < 1) {
@@ -159,11 +158,11 @@ Module.register("MMM-GPIO", {
 			return;
 		}
 		
-		var result = { name: resource.name, pin: resource.pin };
+		if (!axis.isBoolean(resource.activeLow)) { resource.activeLow = self.config.activeLow; }
+		
+		var result = { type: type, name: resource.name, pin: resource.pin, activeLow: resource.activeLow };
 		
 		if (type === "LED") {
-			result.type = "LED";
-			
 			if (!axis.isNumber(resource.value) || isNaN(resource.value)) { resource.value = 0; }
 			else if (resource.value < 0) { resource.value = 0; }
 			else if (resource.value > 1) { resource.value = 1; }
@@ -172,27 +171,16 @@ Module.register("MMM-GPIO", {
 			else if (resource.exitValue < 0) { resource.exitValue = 0; }
 			else if (resource.exitValue > 1) { resource.exitValue = 1; }
 			
-			if (!axis.isBoolean(resource.activeLow)) { resource.activeLow = self.config.activeLow; }
-			
 			result.value = resource.value;
 			result.exitValue = resource.exitValue;
-			result.activeLow = resource.activeLow;
 		} else if (type === "OUT") {
-			result.type = "OUT";
-			
 			if (resource.value !== 0 && resource.value !== 1) { resource.value = 0; }
-			if (!axis.isBoolean(resource.activeLow)) { resource.activeLow = self.config.activeLow; }
-			
 			result.value = resource.value;
-			result.activeLow = resource.activeLow;
 		} else if (type === "BTN") {
-			result.type = "BTN";
-			
 			if (!axis.isBoolean(resource.clearAlertOnRelease)) { resource.clearAlertOnRelease = self.config.clearAlertOnRelease; }
 			if (!axis.isNumber(resource.debounceTimeout) || isNaN(resource.debounceTimeout) || resource.debounceTimeout < 0 ) { resource.debounceTimeout = self.config.debounceTimeout; }
 			if (!axis.isNumber(resource.multiPressTimeout) || isNaN(resource.multiPressTimeout) || resource.multiPressTimeout < 0 ) { resource.multiPressTimeout = self.config.multiPressTimeout; }
 			if (!axis.isNumber(resource.longPressTime) || isNaN(resource.longPressTime) || resource.longPressTime < 0 ) { resource.longPressTime = self.config.longPressTime; }
-			if (!axis.isBoolean(resource.activeLow)) { resource.activeLow = self.config.activeLow; }
 			
 			if (axis.isObject(resource.longPressAlert) && axis.isString(resource.longPressAlert.message)) {
 				result.longPressAlert = { message: resource.longPressAlert.message, title: null, imageFA: null };
@@ -207,12 +195,13 @@ Module.register("MMM-GPIO", {
 				actionName = self.triggerActionMapping[triggerName];
 				result[actionName] = [];
 				actions = resource[triggerName];
+				
 				if (axis.isUndefined(actions)) { continue; }
-				else if (!axis.isArray(actions)) { actions = [ actions ]; }
+				if (!axis.isArray(actions)) { actions = [ actions ]; }
 				
 				for (k = 0; k < actions.length; k++) {
 					action = actions[k];
-					if (!axis.isString(action.action)) { continue; }
+					if (!axis.isString(action.action) || action.action.length < 1) { continue; }
 					if (action.action === "NOTIFY") {
 						if (!axis.isString(action.notification)) { continue; }
 					} else {
@@ -222,11 +211,16 @@ Module.register("MMM-GPIO", {
 				}
 			}
 			
+			if (result.TRIPPLE_PRESS.length > 0 || result.TRIPPLE_RELEASE.length > 0) { result.numShortPress = 3; }
+			else if (result.DOUBLE_PRESS.length > 0 || result.DOUBLE_RELEASE.length > 0) { result.numShortPress = 2; }
+			else if (result.PRESS.length > 0 || result.RELEASE.length > 0) { result.numShortPress = 1; }
+			else { result.numShortPress = 0; }
+			result.enableLongPress = (result.LONG_PRESS.length > 0 || result.LONG_RELEASE.length > 0);
+			
 			result.clearAlertOnRelease = resource.clearAlertOnRelease;
 			result.debounceTimeout = resource.debounceTimeout;
 			result.multiPressTimeout = resource.multiPressTimeout;
 			result.longPressTime = resource.longPressTime;
-			result.activeLow = resource.activeLow;
 		}
 		
 		self.pinList.push(resource.pin);
