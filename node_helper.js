@@ -75,11 +75,12 @@ module.exports = NodeHelper.create({
 	initializeResources: function(payload) {
 		var self = this;
 		var i, r;
-		self.developerMode = payload.developerMode;
 		var resourceList = Object.values(payload.resources);
 		if (self.initializedLED || self.initializedOnOff) {
-			if (self.developerMode) { self.sendSocketNotification("LOG", { original: payload, message: ("node_helper.js has already been initialized."), messageType: "dev" } ); }
+			self.sendSocketNotification("LOG", { original: payload, message: ("node_helper.js has already been initialized."), messageType: "dev" } );
+			if (payload.developerMode) { console.log(self.name + ": node_helper.js has already been initialized."); }
 		} else if (resourceList.length >= 1) {
+			self.developerMode = payload.developerMode;
 			self.resources = payload.resources;
 			var pinListLED = [];
 			for (i = 0; i < resourceList.length; i++) {
@@ -92,7 +93,7 @@ module.exports = NodeHelper.create({
 			else { self.initOnOff(); }
 			
 		} else {
-			if (self.developerMode) { self.sendSocketNotification("LOG", { original: payload, message: ("Unable to initialize node_helper.js.  No resources have been defined. "), messageType: "dev" } ); }
+			self.sendSocketNotification("LOG", { original: payload, message: ("Unable to initialize node_helper.js.  No resources have been defined. "), messageType: "dev" } );
 		}
 	},
 	
@@ -144,6 +145,10 @@ module.exports = NodeHelper.create({
 	initOnOff: function() {
 		var self = this;
 		var i, r, options;
+		
+		self.sendSocketNotification("LOG", { original: null, message: ("Initializing Buttons and/or Outputs.") } );
+		console.log(self.name + ": Initializing Buttons and/or Outputs.");
+		
 		var resourceList = Object.values(self.resources);
 		for (i = 0; i < resourceList.length; i++) {
 			r = resourceList[i];
@@ -158,7 +163,6 @@ module.exports = NodeHelper.create({
 				r.pressCount = 0;
 				r.releaseCount = 0;
 				r.isPressed = false;
-				r.pressedTime = 0;
 				r.pressID = r.name + "1";
 				r.releaseID = r.name + "2";
 				r.longPressID = r.name + "3";
@@ -195,62 +199,62 @@ module.exports = NodeHelper.create({
 				r.pressCount++;
 				
 				if (r.pressCount === 1) {
+					r.releaseCount = 1;
 					// Set timeout for the long press action trigger
 					self.buttonTimeouts[r.longPressID] = setTimeout(function(){
-						self.buttonPressHandler(r.name, "LONG_PRESS");
 						r.pressCount = 0;
-						r.releaseCount = -1;
-					}, r.longPressTime);
+						r.releaseCount = 4;
+						self.buttonPressHandler(r.name, "LONG_PRESS");
+					}, r.longPressTime + r.multiPressTimeout);
 					// Set timeout for the regular press action trigger
 					self.buttonTimeouts[r.pressID] = setTimeout(function(){
-						self.buttonPressHandler(r.name, "PRESS");
 						r.pressCount = 0;
+						self.buttonPressHandler(r.name, "PRESS");
 					}, r.multiPressTimeout);		
 					// Set timeout for the long press alert action trigger
-					self.buttonTimeouts[r.longPressAlertID] = setTimeout(function(){
-						self.triggerAlert(r.name);
-					}, r.multiPressTimeout);
+					if (!axis.isNull(r.longPressAlert)) {
+						self.buttonTimeouts[r.longPressAlertID] = setTimeout(function(){
+							self.triggerAlert(r.name);
+						}, r.multiPressTimeout);
+					}
 				} else if (r.pressCount === 2) {
+					r.releaseCount = 2;
 					clearTimeout(self.buttonTimeouts[r.pressID]);
 					clearTimeout(self.buttonTimeouts[r.releaseID]);
 					self.buttonTimeouts[r.pressID] = setTimeout(function(){
-						self.buttonPressHandler(r.name, "DOUBLE_PRESS");
 						r.pressCount = 0;
+						self.buttonPressHandler(r.name, "DOUBLE_PRESS");
 					}, r.multiPressTimeout);
 				} else if (r.pressCount === 3) {
+					r.releaseCount = 3;
 					clearTimeout(self.buttonTimeouts[r.pressID]);
 					clearTimeout(self.buttonTimeouts[r.releaseID]);
-					self.buttonPressHandler(r.name, "TRIPPLE_PRESS");
 					r.pressCount = 0;
+					self.buttonPressHandler(r.name, "TRIPPLE_PRESS");
 				}
 			} else if (value === 0 && r.isPressed) {
 				r.isPressed = false;
-				r.releaseCount++;
 				
 				clearTimeout(self.buttonTimeouts[r.longPressID]);
 				clearTimeout(self.buttonTimeouts[r.longPressAlertID]);
 				
-				if (r.releaseCount === 0) {
-					self.buttonPressHandler(r.name, "LONG_RELEASE");
-				} else if (r.releaseCount === 1) {
+				if (r.releaseCount === 1) {
 					// If a long-press alert was triggered, clear it, otherwise trigger the release action timeout
 					if (r.longPressAlertIsActive) {
 						self.clearAlert(r.name);
-						r.releaseCount = 0;
 					} else {
 						self.buttonTimeouts[r.releaseID] = setTimeout(function(){
 							self.buttonPressHandler(r.name, "RELEASE");
-							r.releaseCount = 0;
 						}, r.multiPressTimeout);
 					}
 				} else if (r.releaseCount === 2) {
 					self.buttonTimeouts[r.releaseID] = setTimeout(function(){
 						self.buttonPressHandler(r.name, "DOUBLE_RELEASE");
-						r.releaseCount = 0;
 					}, r.multiPressTimeout);
 				} else if (r.releaseCount === 3) {
 					self.buttonPressHandler(r.name, "TRIPPLE_RELEASE");
-					r.releaseCount = 0;
+				} else if (r.releaseCount === 4) {
+					self.buttonPressHandler(r.name, "LONG_RELEASE");
 				}
 			}
 			

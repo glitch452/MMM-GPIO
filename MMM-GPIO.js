@@ -24,8 +24,8 @@ Module.register("MMM-GPIO", {
 		outputs: [],
 		pinScheme: "BCMv2",
 		activeLow: false,
-		debounceTimeout: 15,
-		multiPressTimeout: 400,
+		debounceTimeout: 8,
+		multiPressTimeout: 300,
 		longPressTime: 3000,
 		clearAlertOnRelease: false,
 		scriptPath: null, // Set in self.start() becuase access to self.data.path is needed
@@ -225,7 +225,7 @@ Module.register("MMM-GPIO", {
 			result.clearAlertOnRelease = resource.clearAlertOnRelease;
 			result.debounceTimeout = resource.debounceTimeout;
 			result.multiPressTimeout = resource.multiPressTimeout;
-			result.longPressTime = resource.longPressTime + resource.multiPressTimeout;
+			result.longPressTime = resource.longPressTime;
 			result.activeLow = resource.activeLow;
 		}
 		
@@ -304,47 +304,10 @@ Module.register("MMM-GPIO", {
 	},
 	
 	/**
-	 * Override the getDom function to generate the DOM objects to be displayed for this module instance
+	 * Override the getDom function to generate the DOM objects to be displayed for this module instance.
+	 * Since this module has nothing to display, return an empty text node.
 	 */
-	getDom: function() {
-		
-		return null;
-		
-	},
-	
-	/**
-	 * The roundNumber function rounds a number to the specified number of decimal places.  
-	 * Use a negative precision value to round to a position left of the decimal.  
-	 * This function overcomes the floating-point rounding issues and rounds away from 0.  
-	 * 
-	 * @param number (number) The number to round
-	 * @param precision (number) The position to round to before or after the decimal
-	 * @return (number) The rounded number
-	 */
-	roundNumber: function(number, precision) {
-        if (precision >= 0) { return Number(Math.round(number + "e" + precision) + "e-" + precision); }
-    	else { return Number(Math.round(number + "e-" + Math.abs(precision)) + "e" + Math.abs(precision)); }
-    },
-	
-	/**
-	 * The replaceAll function replaces all occurrences of a string within the given string. 
-	 * 
-	 * @param str (string) The string to search within
-	 * @param find (string) The string to find within str
-	 * @param replace (string) The string to use as a replacement for the find string
-	 * @return (string) A copy of str with all the find occurrences replaced with replace
-	 */
-	replaceAll: function(str, find, replace) {
-		var output = "";
-		var idx = str.indexOf(find);
-		while (idx >= 0) {
-			output += str.substr(0, idx) + replace;
-			str = str.substring(idx + find.length);
-			idx = str.indexOf(find);
-		}
-		output += str;
-		return output;
-	},
+	getDom: function() { return document.createTextNode(""); },
 	
 	/**
 	 * Override the getScripts function to load additional scripts used by this module. 
@@ -357,10 +320,9 @@ Module.register("MMM-GPIO", {
 	
 	/**
 	 * Override the getStyles function to load CSS files used by this module. 
+	 * Since this module does not display anything, return an empty list. 
 	 */
-	getStyles: function () {
-		return [];
-	},
+	getStyles: function () { return []; },
 	
 	/**
 	 * Override the getTranslations function to load translation files specific to this module. 
