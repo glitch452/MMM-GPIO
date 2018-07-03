@@ -37,6 +37,7 @@ module.exports = NodeHelper.create({
 		self.developerMode = false;
 		self.processName = "";
 		self.resources = {};
+		self.scenes = {};
 		self.animations = {};
 		self.buttonTimeouts = {};
 		self.onoff = {};
@@ -66,7 +67,7 @@ module.exports = NodeHelper.create({
 	},
 	
 	/**
-	 * The initializeResources function sets up the resource variables and calls the startPiBlaster
+	 * The initializeResources function sets up the resource variables then initializes 'onoff' and 'pi-blaster'
 	 * 
 	 * @param payload (object) The payload object from the socketNotification init request
 	 */
@@ -85,6 +86,7 @@ module.exports = NodeHelper.create({
 			}
 			if (pinListLED.length > 0) { self.startPiBlaster(payload.scriptPath, pinListLED.join(",")); }
 			else { self.initOnOff(); }
+			self.scenes = payload.scenes;
 		} else {
 			self.sendSocketNotification("LOG", { original: payload, message: ("Unable to initialize node_helper.js.  No resources have been defined. "), messageType: "dev" } );
 		}
@@ -340,48 +342,62 @@ module.exports = NodeHelper.create({
 	/**
 	 * The actionHandler function handles led actions received from various sources
 	 * 
-	 * @param payload (object) Contains the action parameters
+	 * @param payload (object) Contains the action parameters { action: "", name: "" }
 	 * @return (boolean) returns true if a valid action was requested, false otherwise
 	 */
 	actionHandler: function(payload) {
 		var self = this;
+		var r, objectType, triggerAction;
 		
 		if (self.developerMode) { console.log(self.name + ": actionHandler(): " + JSON.stringify(payload)); }
 		
-		var r = self.resources[payload.name];
-		if (axis.isUndefined(r)) {
-			 console.log(self.name + ": actionHandler(): There is no resource assigned to the name: \"" + payload.name + "\"." );
-			 return false;
-		}
 		if (!axis.isString(payload.action)) { return false; }
 		payload.action = payload.action.toUpperCase();
+		
+		if (payload.action.indexOf("_SCENE") >= 0) {
+			r = self.scenes[payload.name];
+			objectType = "scene";
+		} else {
+			r = self.resources[payload.name];
+			objectType = "resource";
+		}
+		
+		if (axis.isUndefined(r)) {
+			 console.log(self.name + ": actionHandler(): There is no " + objectType + " assigned to the name: \"" + payload.name + "\"." );
+			 return false;
+		}
 		
 		if (r.type === "LED") {
 			self.clearAnimation(r);
 			switch (payload.action) {
-				case "SET": self.setLED(r, payload.value); break;
-				case "INCREASE": self.increaseLED(r, payload.value); break;
-				case "DECREASE": self.decreaseLED(r, payload.value); break;
-				case "TOGGLE": self.toggleLED(r, payload.value); break;
-				case "BLINK": self.blinkLED(r, payload.time, payload.offTime, payload.value); break;
+				case "SET": triggerAction = function() { self.setLED(r, payload.value, payload.masterValue); }; break;
+				case "INCREASE": triggerAction = function() { self.increaseLED(r, payload.value); }; break;
+				case "DECREASE": triggerAction = function() { self.decreaseLED(r, payload.value); }; break;
+				case "TOGGLE": triggerAction = function() { self.toggleLED(r, payload.value, payload.masterValue); }; break;
+				case "BLINK": triggerAction = function() { self.blinkLED(r, payload.time, payload.offTime, payload.value, payload.masterValue); }; break;
 				default: return false;
 			}
 		} else if (r.type === "OUT") {
 			self.clearAnimation(r);
 			switch (payload.action) {
-				case "SET": self.setOUT(r, payload.value); break;
-				case "TOGGLE": self.toggleOUT(r, payload.value); break;
-				case "BLINK": self.blinkOUT(r, payload.time, payload.offTime, payload.value); break;
+				case "SET": triggerAction = function() { self.setOUT(r, payload.value); }; break;
+				case "TOGGLE": triggerAction = function() { self.toggleOUT(r, payload.value); }; break;
+				case "BLINK": triggerAction = function() { self.blinkOUT(r, payload.time, payload.offTime, payload.value); }; break;
 				default: return false;
 			}
-		} else if (r.type === "BTN") {
-			if (self.buttonActions.includes(payload.action)) {
-				self.buttonPressHandler(r, payload.action);
-			} else {
-				return false;
+		} else if (r.type === "SCN") {
+			switch (payload.action) {
+				case "SET_SCENE": triggerAction = function() { self.setSCN(r, payload.value); }; break;
+				default: return false;
 			}
 		} else {
 			return false;
+		}
+		
+		if (axis.isNumber(payload.delay) && !isNaN(payload.delay) && payload.delay > 0) {
+			setTimeout(triggerAction, payload.delay);
+		} else {
+			triggerAction();
 		}
 		
 		return true;
@@ -395,31 +411,67 @@ module.exports = NodeHelper.create({
 	 */
 	getHandler: function(req, res) {
 		var self = this;
-		var output;
+		var output, i;
 		var payload = url.parse(req.url, true).query;
 		
 		if (self.developerMode) { console.log(self.name + ": getHandler(): " + JSON.stringify(payload)); }
 		
-		if (axis.isUndefined(self.resources[payload.name])) {
+		if (!axis.isString(payload.action)) {
+			res.send(JSON.stringify({ error: true, message: "Unable to proceed.  Please provide an action." }));
+		}
+		
+		payload.action = payload.action.toUpperCase();
+		
+		var type = payload.action.indexOf("_SCENE") >= 0 ? "scene" : "resource";
+		
+		if (type === "scene" && axis.isUndefined(self.scenes[payload.name])) {
+			res.send(JSON.stringify({ error: true, message: "There is no scene assigned to the name: \"" + payload.name + "\"." }));
+		} else if (type === "resource" && axis.isUndefined(self.resources[payload.name])) {
 			res.send(JSON.stringify({ error: true, message: "There is no resource assigned to the name: \"" + payload.name + "\"." }));
 		} else {
-			if (!axis.isString(payload.action)) {
-				res.send(JSON.stringify({ error: true, message: "The provided action must be a string." }));
-				return;
-			}
-			payload.action = payload.action.toUpperCase();
 			if (payload.action === "GET_ALL") {
-				var resources = [];
+				var data = [];
 				var resourceList = Object.values(self.resources);
-				for (var i = 0; i < resourceList.length; i++) { resources.push(resourceList[i]); }
-				output = Object.assign({ error: false }, { data: resources });
+				var sceneList = Object.values(self.scenes);
+				for (i = 0; i < resourceList.length; i++) { data.push(resourceList[i]); }
+				for (i = 0; i < sceneList.length; i++) { data.push(sceneList[i]); }
+				output = Object.assign({ error: false }, { data: data });
 				res.send(JSON.stringify(output));
-			} else if (payload.action === "GET" || self.actionHandler(payload)) {
-				output = Object.assign({ error: false }, { data: self.resources[payload.name] });
+			} else if (payload.action === "GET" || payload.action === "GET_SCENE" || self.actionHandler(payload)) {
+				if (type === "scene") {
+					output = Object.assign({ error: false }, { data: self.scenes[payload.name] });
+				} else if (type === "resource") {
+					output = Object.assign({ error: false }, { data: self.resources[payload.name] });
+				}
 				res.send(JSON.stringify(output));
 			} else {
 				res.send(JSON.stringify({ error: true, message: "The action \"" + payload.action + "\" is not valid." }));
 			}
+		}
+	},
+	
+	/**
+	 * Initiate the scene
+	 * 
+	 * @param s (object) The scene object
+	 * @param value (number) The relative value to assign to the specified LED resources in the scene
+	 */
+	setSCN: function(s, value) {
+		var self = this;
+		value = Number(value);
+		if (!self.initializedOnOff && !self.initializedLED) { return; }
+		if (self.developerMode) { console.log(self.name + ": setSCN(): Name: \"" + s.name + "\""); }
+		
+		if (!isNaN(value)) {
+			if (value > 1) { value = 1; } else if (value < 0) { value = 0; }
+		} else {
+			value = s.value;
+		}
+		
+		for (var i = 0; i < s.actions.length; i++) {
+			var action = Object.assign({}, s.actions[i]);
+			action.masterValue = value;
+			self.actionHandler(action);
 		}
 	},
 	
@@ -506,13 +558,18 @@ module.exports = NodeHelper.create({
 	 * 
 	 * @param r (object) The resource object
 	 * @param value (number) The value to assign to the specified resource
+	 * @param masterValue (number) Ther percentage of the given value to be set
 	 */
-	setLED: function(r, value) {
+	setLED: function(r, value, masterValue) {
 		var self = this;
 		value = Number(value);
+		masterValue = Number(masterValue);
 		if (!self.initializedLED || !axis.isNumber(value) || isNaN(value)) { return; }
-		if (value > 1) { value = 1; }
-		else if (value < 0) { value = 0; }
+		if (value > 1) { value = 1; } else if (value < 0) { value = 0; }
+		if (axis.isNumber(masterValue) && !isNaN(masterValue)) {
+			if (masterValue > 1) { masterValue = 1; } else if (masterValue < 0) { masterValue = 0; }
+			value = value * masterValue;
+		}
 		
 		if (self.developerMode) { console.log(self.name + ": setLED(): Name: \"" + r.name + "\" Pin: \"" + r.pin + "\" value: \"" + value + "\""); }
 		
@@ -560,8 +617,9 @@ module.exports = NodeHelper.create({
 	 * 
 	 * @param r (object) The resource object
 	 * @param value (number) The brightness value use when turning the LED on.  The previously used value (or 1) will be used if this is not provided.
+	 * @param masterValue (number) Ther percentage of the given value to be set
 	 */
-	toggleLED: function(r, value) {
+	toggleLED: function(r, value, masterValue) {
 		var self = this;
 		if (!self.initializedLED) { return; }
 		value = Number(value);
@@ -569,9 +627,9 @@ module.exports = NodeHelper.create({
 		if (self.developerMode) { console.log(self.name + ": toggleLED(): Name: \"" + r.name + "\" value: \"" + value + "\""); }
 		
 		if (r.value === 0) {
-			if (!axis.isNull(value)) { self.setLED(r, value); }
-			else if (axis.isUndefined(r.toggleValue)) { self.setLED(r, 1); }
-			else { self.setLED(r, r.toggleValue); }
+			if (!axis.isNull(value)) { self.setLED(r, value, masterValue); }
+			else if (axis.isUndefined(r.toggleValue)) { self.setLED(r, 1, masterValue); }
+			else { self.setLED(r, r.toggleValue, masterValue); }
 		} else {
 			r.toggleValue = r.value;
 			self.setLED(r, 0);
@@ -585,8 +643,9 @@ module.exports = NodeHelper.create({
 	 * @param time (number) The number of milliseconds to keep the output 'on'
 	 * @param offTime (number) The number of milliseconds to keep the output 'off'.  The time parameter is used if this is not provided.
 	 * @param value (number) The brightness value to use for the 'on' duration
+	 * @param masterValue (number) Ther percentage of the given value to be set
 	 */
-	blinkLED: function(r, time, offTime, value) {
+	blinkLED: function(r, time, offTime, value, masterValue) {
 		var self = this;
 		if (!self.initializedLED) { return; }
 		time = Number(time);
@@ -602,7 +661,7 @@ module.exports = NodeHelper.create({
 		blink = function() {
 			var blinkTime = offTime;
 			if (r.value === 0) { blinkTime = time; }
-			self.toggleLED(r, value);
+			self.toggleLED(r, value, masterValue);
 			self.animations[r.name] = setTimeout(function(){ blink(); }, blinkTime);
 		};
 		

@@ -22,6 +22,7 @@ Module.register("MMM-GPIO", {
 		leds: [],
 		buttons: [],
 		outputs: [],
+		scenes: [],
 		pinScheme: "BCMv2",
 		activeLow: false,
 		debounceTimeout: 8,
@@ -48,6 +49,7 @@ Module.register("MMM-GPIO", {
 		self.instanceID = self.identifier + "_" + Math.random().toString().substring(2);
 		self.defaults.scriptPath = self.data.path + "pi-blaster";
 		self.resources = {};
+		self.scenes = {};
 		self.pinList = [];
 		self.nameList = [];
 		self.validPinSchemes = [ "BCMv1", "BCMv2" ];
@@ -101,26 +103,36 @@ Module.register("MMM-GPIO", {
 		if (!axis.isNumber(self.config.multiPressTimeout) || isNaN(self.config.multiPressTimeout) || self.config.multiPressTimeout < 0 ) { self.config.multiPressTimeout = self.defaults.multiPressTimeout; }
 		if (!axis.isNumber(self.config.longPressTime) || isNaN(self.config.longPressTime) || self.config.longPressTime < 0 ) { self.config.longPressTime = self.defaults.longPressTime; }
 		
+		if (!axis.isArray(self.config.leds)) { self.config.leds = [ self.config.leds ]; }
+		if (!axis.isArray(self.config.outputs)) { self.config.outputs = [ self.config.outputs ]; }
+		if (!axis.isArray(self.config.buttons)) { self.config.buttons = [ self.config.buttons ]; }
+		if (!axis.isArray(self.config.scenes)) { self.config.scenes = [ self.config.scenes ]; }
+		
 		// Loop through the provided configurations and add valid ones to the resources
 		for (i = 0; i < self.config.leds.length; i++) { self.addResource("LED", self.config.leds[i]); }
 		for (i = 0; i < self.config.outputs.length; i++) { self.addResource("OUT", self.config.outputs[i]); }
 		for (i = 0; i < self.config.buttons.length; i++) { self.addResource("BTN", self.config.buttons[i]); }
 		
+		// Add the scenes
+		for (i = 0; i < self.config.scenes.length; i++) { self.addScene(self.config.scenes[i]); }
+		
 		self.log(("start(): self.data: " + JSON.stringify(self.data)), "dev");
 		self.log(("start(): self.config: " + JSON.stringify(self.config)), "dev");
 		self.log(("start(): self.resources: " + JSON.stringify(self.resources)), "dev");
+		self.log(("start(): self.scenes: " + JSON.stringify(self.scenes)), "dev");
 		
 		self.sendSocketNotification("INIT", {
 			instanceID: self.instanceID,
 			scriptPath: self.config.scriptPath,
 			resources: self.resources,
+			scenes: self.scenes,
 			developerMode: self.config.developerMode
 		});
 		
 	},
 	
 	/**
-	 * Validate the provided pin number against the pinMapping list
+	 * Validate the resource and add it to the resources list
 	 * 
 	 * @param type (string) The type of resource
 	 * @param resource (object) The resource to validate
@@ -225,8 +237,46 @@ Module.register("MMM-GPIO", {
 		
 		self.pinList.push(resource.pin);
 		self.nameList.push(resource.name);
-		self.resources[resource.name] =  result;
+		self.resources[resource.name] = result;
 		
+	},
+	
+	/**
+	 * Validate the provided scene and add it to the scene list
+	 * 
+	 * @param scene (object) The scene to validate
+	 */
+	addScene: function(scene) {
+		var self = this;
+		var i, action;
+		
+		if (!axis.isString(scene.name) || scene.name.length < 1) {
+			self.log(("A name has not been provided.  The scene cannot be initialized. "), "warn");
+			return;
+		}
+		
+		var result = { type: "SCN", name: scene.name, actions: [] };
+		
+		if (!axis.isArray(scene.actions)) { scene.actions = [ scene.actions ]; }
+		
+		for (i = 0; i < scene.actions.length; i++) {
+			action = scene.actions[i];
+			if (!axis.isString(action.action) || action.action.length < 1) { continue; }
+			if (!axis.isString(action.name) || action.name.length < 1) { continue; }
+			result.actions.push(action);
+		}
+		
+		if (axis.isUndefined(result.actions)) {
+			self.log(("No valid actions have been provided.  The scene cannot be initialized. "), "warn");
+			return;
+		}
+		
+		if (!axis.isNumber(scene.value) || isNaN(scene.value)) { scene.value = 1; }
+		else if (scene.value < 0) { scene.value = 0; }
+		else if (scene.value > 1) { scene.value = 1; }
+		
+		result.value = scene.value;
+		self.scenes[scene.name] = result;
 	},
 	
 	/**
