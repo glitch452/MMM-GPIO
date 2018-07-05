@@ -275,7 +275,8 @@ Module.register("MMM-GPIO", {
 		else if (scene.value < 0) { scene.value = 0; }
 		else if (scene.value > 1) { scene.value = 1; }
 		
-		result.value = scene.value;
+		result.default = scene.value;
+		result.value = 0;
 		self.scenes[scene.name] = result;
 	},
 	

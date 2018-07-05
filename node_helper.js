@@ -130,7 +130,9 @@ module.exports = NodeHelper.create({
 		for (var i = 0; i < resourceList.length; i++) {
 			var r = self.resources[resourceList[i]];
 			if (r.type === "LED") {
-				self.setLED(r, r.value);
+				var value = r.value;
+				r.value = null;
+				self.setLED(r, value);
 			}
 		}
 	},
@@ -370,10 +372,10 @@ module.exports = NodeHelper.create({
 		if (r.type === "LED") {
 			self.clearAnimation(r);
 			switch (payload.action) {
-				case "SET": triggerAction = function() { self.setLED(r, payload.value, payload.masterValue); }; break;
-				case "INCREASE": triggerAction = function() { self.increaseLED(r, payload.value); }; break;
-				case "DECREASE": triggerAction = function() { self.decreaseLED(r, payload.value); }; break;
-				case "TOGGLE": triggerAction = function() { self.toggleLED(r, payload.value, payload.masterValue); }; break;
+				case "SET": triggerAction = function() { self.setLED(r, payload.value, payload.masterValue, payload.time); }; break;
+				case "INCREASE": triggerAction = function() { self.increaseLED(r, payload.value, payload.time); }; break;
+				case "DECREASE": triggerAction = function() { self.decreaseLED(r, payload.value, payload.time); }; break;
+				case "TOGGLE": triggerAction = function() { self.toggleLED(r, payload.value, payload.masterValue, payload.time); }; break;
 				case "BLINK": triggerAction = function() { self.blinkLED(r, payload.time, payload.offTime, payload.value, payload.masterValue); }; break;
 				default: return false;
 			}
@@ -387,13 +389,17 @@ module.exports = NodeHelper.create({
 			}
 		} else if (r.type === "SCN") {
 			switch (payload.action) {
-				case "SET_SCENE": triggerAction = function() { self.setSCN(r, payload.value); }; break;
+				case "SET_SCENE": triggerAction = function() { self.setSCN(r, payload.value, payload.time); }; break;
+				case "INCREASE_SCENE": triggerAction = function() { self.increaseSCN(r, payload.value, payload.time); }; break;
+				case "DECREASE_SCENE": triggerAction = function() { self.decreaseSCN(r, payload.value, payload.time); }; break;
+				case "TOGGLE_SCENE": triggerAction = function() { self.toggleSCN(r, payload.value, payload.time); }; break;
 				default: return false;
 			}
 		} else {
 			return false;
 		}
 		
+		if (axis.isString(payload.delay)) { payload.delay = Number(payload.delay); }
 		if (axis.isNumber(payload.delay) && !isNaN(payload.delay) && payload.delay > 0) {
 			setTimeout(triggerAction, payload.delay);
 		} else {
@@ -455,23 +461,87 @@ module.exports = NodeHelper.create({
 	 * 
 	 * @param s (object) The scene object
 	 * @param value (number) The relative value to assign to the specified LED resources in the scene
+	 * @param time (number) The duration of the change in milliseconds using a fade effect
 	 */
-	setSCN: function(s, value) {
+	setSCN: function(s, value, time) {
 		var self = this;
-		value = Number(value);
 		if (!self.initializedOnOff && !self.initializedLED) { return; }
-		if (self.developerMode) { console.log(self.name + ": setSCN(): Name: \"" + s.name + "\""); }
+		if (axis.isString(value)) { value = Number(value); }
+		if (self.developerMode) { console.log(self.name + ": setSCN(): Name: \"" + s.name + "\"" + value + "\" time: \"" + time + "\""); }
 		
-		if (!isNaN(value)) {
+		if (axis.isNumber(value) && !isNaN(value)) {
 			if (value > 1) { value = 1; } else if (value < 0) { value = 0; }
 		} else {
-			value = s.value;
+			value = s.default;
 		}
+		
+		s.value = value;
 		
 		for (var i = 0; i < s.actions.length; i++) {
 			var action = Object.assign({}, s.actions[i]);
 			action.masterValue = value;
+			if (action.action.toUpperCase() !== "BLINK") { action.time = time; }
 			self.actionHandler(action);
+		}
+	},
+	
+	/**
+	 * Increase the value of the scene
+	 * 
+	 * @param s (object) The scene object
+	 * @param value (number) The value to increase the scene by
+	 * @param time (number) The duration of the change in milliseconds using a fade effect
+	 */
+	increaseSCN: function(s, value, time) {
+		var self = this;
+		if (!self.initializedOnOff && !self.initializedLED) { return; }
+		if (axis.isString(value)) { value = Number(value); }
+		if (!axis.isNumber(value) || isNaN(value)) { value = 0.1; }
+		
+		if (self.developerMode) { console.log(self.name + ": increaseSCN(): Name: \"" + s.name + "\"" + value + "\" time: \"" + time + "\""); }
+		
+		self.setSCN(s, s.value + value, time);
+	},
+	
+	/**
+	 * Decrease the value of the scene
+	 * 
+	 * @param s (object) The scene object
+	 * @param value (number) The value to decrease the scene by
+	 * @param time (number) The duration of the change in milliseconds using a fade effect
+	 */
+	decreaseSCN: function(s, value, time) {
+		var self = this;
+		if (!self.initializedOnOff && !self.initializedLED) { return; }
+		if (axis.isString(value)) { value = Number(value); }
+		if (!axis.isNumber(value) || isNaN(value)) { value = 0.1; }
+		
+		if (self.developerMode) { console.log(self.name + ": decreaseSCN(): Name: \"" + s.name + "\"" + value + "\" time: \"" + time + "\""); }
+		
+		self.setSCN(s, s.value - value, time);
+	},
+	
+	/**
+	 * Toggle the scene on and off, using the last value as its on level
+	 * 
+	 * @param s (object) The scene object
+	 * @param value (number) The brightness value use when turning the Scene on.  The previously used value (or 1) will be used if this is not provided.
+	 * @param time (number) The duration of the change in milliseconds using a fade effect
+	 */
+	toggleSCN: function(s, value, time) {
+		var self = this;
+		if (!self.initializedOnOff && !self.initializedLED) { return; }
+		if (axis.isString(value)) { value = Number(value); }
+		if (!axis.isNumber(value) || isNaN(value) || value <= 0 || value > 1) { value = null; }
+		if (self.developerMode) { console.log(self.name + ": toggleSCN(): Name: \"" + s.name + "\"" + value + "\" time: \"" + time + "\""); }
+		
+		if (s.value === 0) {
+			if (!axis.isNull(value)) { self.setSCN(s, value, time); }
+			else if (axis.isUndefined(s.toggleValue)) { self.setSCN(s, 1, time); }
+			else { self.setSCN(s, s.toggleValue, time); }
+		} else {
+			s.toggleValue = s.value;
+			self.setSCN(s, 0, time);
 		}
 	},
 	
@@ -484,6 +554,7 @@ module.exports = NodeHelper.create({
 		var self = this;
 		if (axis.isObject(r)) {
 			clearTimeout(self.animations[r.name]);
+			clearInterval(self.animations[r.name]);
 			delete self.animations[r.name];
 		}
 	},
@@ -496,7 +567,7 @@ module.exports = NodeHelper.create({
 	 */
 	setOUT: function(r, value) {
 		var self = this;
-		value = Number(value);
+		if (axis.isString(value)) { value = Number(value); }
 		if (!self.initializedOnOff || (value !== 0 && value !== 1)) { return; }
 		if (self.developerMode) { console.log(self.name + ": setOUT(): Name: \"" + r.name + "\" Pin: \"" + r.pin + "\" value: \"" + value + "\""); }
 		var actualValue = value;
@@ -533,8 +604,8 @@ module.exports = NodeHelper.create({
 	blinkOUT: function(r, time, offTime) {
 		var self = this;
 		if (!self.initializedOnOff) { return; }
-		time = Number(time);
-		offTime = Number(offTime);
+		if (axis.isString(time)) { time = Number(time); }
+		if (axis.isString(offTime)) { offTime = Number(offTime); }
 		if (!axis.isNumber(time) || isNaN(time) || time <= 0) { time = 750; }
 		if (!axis.isNumber(offTime) || isNaN(offTime) || offTime <= 0) { offTime = time; }
 		var value = r.value === 0 ? 1 : 0;
@@ -559,23 +630,62 @@ module.exports = NodeHelper.create({
 	 * @param r (object) The resource object
 	 * @param value (number) The value to assign to the specified resource
 	 * @param masterValue (number) Ther percentage of the given value to be set
+	 * @param time (number) The duration of the change in milliseconds using a fade effect
 	 */
-	setLED: function(r, value, masterValue) {
+	setLED: function(r, value, masterValue, time) {
 		var self = this;
-		value = Number(value);
-		masterValue = Number(masterValue);
+		if (axis.isString(value)) { value = Number(value); }
+		if (axis.isString(time)) { time = Number(time); }
+		if (axis.isString(masterValue)) { masterValue = Number(masterValue); }
 		if (!self.initializedLED || !axis.isNumber(value) || isNaN(value)) { return; }
 		if (value > 1) { value = 1; } else if (value < 0) { value = 0; }
+		if (isNaN(time) || time <= 15) { time = 0; }
 		if (axis.isNumber(masterValue) && !isNaN(masterValue)) {
 			if (masterValue > 1) { masterValue = 1; } else if (masterValue < 0) { masterValue = 0; }
 			value = value * masterValue;
 		}
+		if (value === r.value) { return; }
 		
-		if (self.developerMode) { console.log(self.name + ": setLED(): Name: \"" + r.name + "\" Pin: \"" + r.pin + "\" value: \"" + value + "\""); }
+		if (self.developerMode) { console.log(self.name + ": setLED(): Name: \"" + r.name + "\" Pin: \"" + r.pin + "\" value: \"" + value + "\" time: \"" + time + "\" masterValue: \"" + masterValue + "\""); }
 		
-		r.value = value;
-		if (r.activeLow) { value = 1 - value; }
-		piBlaster.setPwm(r.pin, value);
+		if (time === 0) {
+			
+			r.value = value;
+			if (r.activeLow) { value = 1 - value; }
+			piBlaster.setPwm(r.pin, value);
+			
+		} else {
+			
+			var isDecreasing = value < r.value ? true : false;
+			var stepTime = 15;
+			var numSteps = Math.ceil(time / stepTime);
+			var valueChange = Math.abs(value - r.value);
+			var stepSize = valueChange / numSteps;
+			if (stepSize < 0.0005) {
+				stepSize = 0.0005;
+				numSteps = Math.ceil(valueChange / stepSize);
+				stepTime = Math.round(time / numSteps);
+			}
+
+			if (self.developerMode) { console.log(self.name + ":  -->  stepTime: \"" + stepTime + "\" stepSize: \"" + stepSize + "\" numSteps: \"" + numSteps + "\""); }
+
+			self.animations[r.name] = setInterval(function(){
+				var newValue = r.value + stepSize;
+				if (isDecreasing) {
+					newValue = r.value - stepSize;
+					if (newValue < value) { newValue = value; }
+				} else {
+					if (newValue > value) { newValue = value; }
+				}
+				
+				r.value = newValue;
+				if (r.activeLow) { newValue = 1 - newValue; }
+				piBlaster.setPwm(r.pin, newValue);
+				
+				if (newValue === value) { clearInterval(self.animations[r.name]); }
+			}, stepTime);
+			
+		}
 	},
 	
 	/**
@@ -583,16 +693,17 @@ module.exports = NodeHelper.create({
 	 * 
 	 * @param r (object) The resource object
 	 * @param value (number) The value to increase the resource by
+	 * @param time (number) The duration of the change in milliseconds using a fade effect
 	 */
-	increaseLED: function(r, value) {
+	increaseLED: function(r, value, time) {
 		var self = this;
-		value = Number(value);
+		if (axis.isString(value)) { value = Number(value); }
 		if (!self.initializedLED) { return; }
 		if (!axis.isNumber(value) || isNaN(value)) { value = 0.1; }
 		
-		if (self.developerMode) { console.log(self.name + ": increaseLED(): Name: \"" + r.name + "\" value: \"" + value + "\""); }
+		if (self.developerMode) { console.log(self.name + ": increaseLED(): Name: \"" + r.name + "\" value: \"" + value + "\" time: \"" + time + "\""); }
 		
-		self.setLED(r, r.value + value);
+		self.setLED(r, r.value + value, null, time);
 	},
 	
 	/**
@@ -600,16 +711,17 @@ module.exports = NodeHelper.create({
 	 * 
 	 * @param r (object) The resource object
 	 * @param value (number) The value to decrease the resource by
+	 * @param time (number) The duration of the change in milliseconds using a fade effect
 	 */
-	decreaseLED: function(r, value) {
+	decreaseLED: function(r, value, time) {
 		var self = this;
-		value = Number(value);
+		if (axis.isString(value)) { value = Number(value); }
 		if (!self.initializedLED) { return; }
 		if (!axis.isNumber(value) || isNaN(value)) { value = 0.1; }
 		
-		if (self.developerMode) { console.log(self.name + ": decreaseLED(): Name: \"" + r.name + "\" value: \"" + value + "\""); }
+		if (self.developerMode) { console.log(self.name + ": decreaseLED(): Name: \"" + r.name + "\" value: \"" + value + "\" time: \"" + time + "\""); }
 		
-		self.setLED(r, r.value - value);
+		self.setLED(r, r.value - value, null, time);
 	},
 	
 	/**
@@ -618,21 +730,22 @@ module.exports = NodeHelper.create({
 	 * @param r (object) The resource object
 	 * @param value (number) The brightness value use when turning the LED on.  The previously used value (or 1) will be used if this is not provided.
 	 * @param masterValue (number) Ther percentage of the given value to be set
+	 * @param time (number) The duration of the change in milliseconds using a fade effect
 	 */
-	toggleLED: function(r, value, masterValue) {
+	toggleLED: function(r, value, masterValue, time) {
 		var self = this;
 		if (!self.initializedLED) { return; }
-		value = Number(value);
+		if (axis.isString(value)) { value = Number(value); }
 		if (!axis.isNumber(value) || isNaN(value) || value <= 0 || value > 1) { value = null; }
-		if (self.developerMode) { console.log(self.name + ": toggleLED(): Name: \"" + r.name + "\" value: \"" + value + "\""); }
+		if (self.developerMode) { console.log(self.name + ": toggleLED(): Name: \"" + r.name + "\" value: \"" + value + "\" time: \"" + time + "\""); }
 		
 		if (r.value === 0) {
-			if (!axis.isNull(value)) { self.setLED(r, value, masterValue); }
-			else if (axis.isUndefined(r.toggleValue)) { self.setLED(r, 1, masterValue); }
-			else { self.setLED(r, r.toggleValue, masterValue); }
+			if (!axis.isNull(value)) { self.setLED(r, value, masterValue, time); }
+			else if (axis.isUndefined(r.toggleValue)) { self.setLED(r, 1, masterValue, time); }
+			else { self.setLED(r, r.toggleValue, masterValue, time); }
 		} else {
 			r.toggleValue = r.value;
-			self.setLED(r, 0);
+			self.setLED(r, 0, null, time);
 		}
 	},
 	
@@ -648,9 +761,9 @@ module.exports = NodeHelper.create({
 	blinkLED: function(r, time, offTime, value, masterValue) {
 		var self = this;
 		if (!self.initializedLED) { return; }
-		time = Number(time);
-		offTime = Number(offTime);
-		value = Number(value);
+		if (axis.isString(time)) { time = Number(time); }
+		if (axis.isString(offTime)) { offTime = Number(offTime); }
+		if (axis.isString(value)) { value = Number(value); }
 		if (!axis.isNumber(time) || isNaN(time) || time <= 0) { time = 750; }
 		if (!axis.isNumber(offTime) || isNaN(offTime) || offTime <= 0) { offTime = time; }
 		if (!axis.isNumber(value) || isNaN(value) || value <= 0 || value > 1) { value = null; }
