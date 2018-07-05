@@ -23,6 +23,7 @@ Module.register("MMM-GPIO", {
 		buttons: [],
 		outputs: [],
 		scenes: [],
+		animations: [],
 		pinScheme: "BCMv2",
 		activeLow: false,
 		debounceTimeout: 8,
@@ -50,6 +51,7 @@ Module.register("MMM-GPIO", {
 		self.defaults.scriptPath = self.data.path + "pi-blaster";
 		self.resources = {};
 		self.scenes = {};
+		self.animations = {};
 		self.pinList = [];
 		self.nameList = [];
 		self.validPinSchemes = [ "BCMv1", "BCMv2" ];
@@ -107,25 +109,29 @@ Module.register("MMM-GPIO", {
 		if (!axis.isArray(self.config.outputs)) { self.config.outputs = [ self.config.outputs ]; }
 		if (!axis.isArray(self.config.buttons)) { self.config.buttons = [ self.config.buttons ]; }
 		if (!axis.isArray(self.config.scenes)) { self.config.scenes = [ self.config.scenes ]; }
+		if (!axis.isArray(self.config.animations)) { self.config.animations = [ self.config.animations ]; }
 		
 		// Loop through the provided configurations and add valid ones to the resources
 		for (i = 0; i < self.config.leds.length; i++) { self.addResource("LED", self.config.leds[i]); }
 		for (i = 0; i < self.config.outputs.length; i++) { self.addResource("OUT", self.config.outputs[i]); }
 		for (i = 0; i < self.config.buttons.length; i++) { self.addResource("BTN", self.config.buttons[i]); }
-		
 		// Add the scenes
 		for (i = 0; i < self.config.scenes.length; i++) { self.addScene(self.config.scenes[i]); }
+		// Add the animations
+		for (i = 0; i < self.config.animations.length; i++) { self.addAnimation(self.config.animations[i]); }
 		
 		self.log(("start(): self.data: " + JSON.stringify(self.data)), "dev");
 		self.log(("start(): self.config: " + JSON.stringify(self.config)), "dev");
 		self.log(("start(): self.resources: " + JSON.stringify(self.resources)), "dev");
 		self.log(("start(): self.scenes: " + JSON.stringify(self.scenes)), "dev");
+		self.log(("start(): self.animations: " + JSON.stringify(self.animations)), "dev");
 		
 		self.sendSocketNotification("INIT", {
 			instanceID: self.instanceID,
 			scriptPath: self.config.scriptPath,
 			resources: self.resources,
 			scenes: self.scenes,
+			animations: self.animations,
 			developerMode: self.config.developerMode
 		});
 		
@@ -278,6 +284,58 @@ Module.register("MMM-GPIO", {
 		result.default = scene.value;
 		result.value = 0;
 		self.scenes[scene.name] = result;
+	},
+	
+	/**
+	 * Validate the provided animation and add it to the animation list
+	 * 
+	 * @param animation (object) The animation to validate
+	 */
+	addAnimation: function(animation) {
+		var self = this;
+		var i, k, action, frame, frame_result;
+		
+		if (!axis.isString(animation.name) || animation.name.length < 1) {
+			self.log(("A name has not been provided.  The animation cannot be initialized. "), "warn");
+			return;
+		}
+		
+		var result = { type: "ANI", name: animation.name, frames: [] };
+		
+		if (!axis.isArray(animation.frames)) { animation.frames = [ animation.frames ]; }
+		
+		for (i = 0; i < animation.frames.length; i++) {
+			
+			frame = animation.frames[i];
+			frame_result = { actions: [] };
+			
+			if (!axis.isArray(frame.actions)) { frame.actions = [ frame.actions ]; }
+			
+			for (k = 0; k < frame.actions.length; k++) {
+				action = frame.actions[k];
+				if (!axis.isString(action.action) || action.action.length < 1) { continue; }
+				if (!axis.isString(action.name) || action.name.length < 1) { continue; }
+				frame_result.actions.push(action);
+			}
+			
+			if (frame_result.actions.length > 0) {
+				if (!axis.isNumber(frame.time) || isNaN(frame.time)) { frame.time = 1000; }
+				if (frame.time < 0) { frame.time = 0; }
+				frame_result.time = frame.time;
+				result.frames.push(frame_result);
+			}
+			
+		}
+		
+		if (axis.isUndefined(result.frames)) {
+			self.log(("No valid frames have been provided.  The animation cannot be initialized. "), "warn");
+			return;
+		}
+		
+		result.repeat = animation.repeat === true ? true : false;
+		result.running = false;
+		
+		self.animations[animation.name] = result;
 	},
 	
 	/**

@@ -39,9 +39,12 @@ module.exports = NodeHelper.create({
 		self.resources = {};
 		self.scenes = {};
 		self.animations = {};
-		self.buttonTimeouts = {};
+		self.resourceTimers = {};
+		self.animationTimers = {};
 		self.onoff = {};
-		self.buttonActions = [ "PRESS", "DOUBLE_PRESS", "TRIPPLE_PRESS", "RELEASE", "DOUBLE_RELEASE", "TRIPPLE_RELEASE", "LONG_PRESS"];
+		self.buttonActions = [ "PRESS", "DOUBLE_PRESS", "TRIPPLE_PRESS", "RELEASE", "DOUBLE_RELEASE", "TRIPPLE_RELEASE", "LONG_PRESS", "LONG_RELEASE"];
+		self.sceneActions = [ "SET_SCENE", "INCREASE_SCENE", "DECREASE_SCENE", "TOGGLE_SCENE" ];
+		self.animationActions = [ "START", "STOP" ];
 		
 		this.expressApp.get("/" + self.name, function(req, res) { self.getHandler(req, res); });
 		
@@ -87,6 +90,7 @@ module.exports = NodeHelper.create({
 			if (pinListLED.length > 0) { self.startPiBlaster(payload.scriptPath, pinListLED.join(",")); }
 			else { self.initOnOff(); }
 			self.scenes = payload.scenes;
+			self.animations = payload.animations;
 		} else {
 			self.sendSocketNotification("LOG", { original: payload, message: ("Unable to initialize node_helper.js.  No resources have been defined. "), messageType: "dev" } );
 		}
@@ -211,18 +215,18 @@ module.exports = NodeHelper.create({
 					};
 					
 					if (r.numShortPress === 1) { triggerPress(); }
-					else if (r.numShortPress > 1) { self.buttonTimeouts[r.pressID] = setTimeout(triggerPress, r.multiPressTimeout); }
+					else if (r.numShortPress > 1) { self.resourceTimers[r.pressID] = setTimeout(triggerPress, r.multiPressTimeout); }
 					else { r.pressCount = r.releaseCount = 0; }
 					
 					if (r.enableLongPress) {
 						
-						self.buttonTimeouts[r.longPressID] = setTimeout(function(){
+						self.resourceTimers[r.longPressID] = setTimeout(function(){
 							r.releaseCount = 4;
 							self.buttonPressHandler(r, "LONG_PRESS");
 						}, r.longPressTime + r.multiPressTimeout);
 						
 						if (!axis.isNull(r.longPressAlert)) {
-							self.buttonTimeouts[r.longPressAlertID] = setTimeout(function(){
+							self.resourceTimers[r.longPressAlertID] = setTimeout(function(){
 								r.releaseCount = 0;
 								self.triggerAlert(r);
 							}, r.multiPressTimeout);
@@ -232,8 +236,8 @@ module.exports = NodeHelper.create({
 					
 				} else if (r.pressCount === 2) {
 					
-					clearTimeout(self.buttonTimeouts[r.pressID]);
-					clearTimeout(self.buttonTimeouts[r.releaseID]);
+					clearTimeout(self.resourceTimers[r.pressID]);
+					clearTimeout(self.resourceTimers[r.releaseID]);
 					
 					r.releaseCount = 2;
 					
@@ -243,12 +247,12 @@ module.exports = NodeHelper.create({
 					};
 					
 					if (r.numShortPress === 2) { triggerPress(); }
-					else if (r.numShortPress > 2) { self.buttonTimeouts[r.pressID] = setTimeout(triggerPress, r.multiPressTimeout); }
+					else if (r.numShortPress > 2) { self.resourceTimers[r.pressID] = setTimeout(triggerPress, r.multiPressTimeout); }
 					
 				} else if (r.pressCount === 3) {
 					
-					clearTimeout(self.buttonTimeouts[r.pressID]);
-					clearTimeout(self.buttonTimeouts[r.releaseID]);
+					clearTimeout(self.resourceTimers[r.pressID]);
+					clearTimeout(self.resourceTimers[r.releaseID]);
 					r.releaseCount = 3;
 					r.pressCount = 0;
 					self.buttonPressHandler(r, "TRIPPLE_PRESS");
@@ -258,20 +262,20 @@ module.exports = NodeHelper.create({
 			} else if (value === 0 && r.isPressed) {
 				r.isPressed = false;
 				
-				clearTimeout(self.buttonTimeouts[r.longPressID]);
-				clearTimeout(self.buttonTimeouts[r.longPressAlertID]);
+				clearTimeout(self.resourceTimers[r.longPressID]);
+				clearTimeout(self.resourceTimers[r.longPressAlertID]);
 				
 				if (r.releaseCount === 1) {
 					if (r.numShortPress === 1) {
 						self.buttonPressHandler(r, "RELEASE");
 					} else {
-						self.buttonTimeouts[r.releaseID] = setTimeout(function(){ self.buttonPressHandler(r, "RELEASE"); }, r.multiPressTimeout);
+						self.resourceTimers[r.releaseID] = setTimeout(function(){ self.buttonPressHandler(r, "RELEASE"); }, r.multiPressTimeout);
 					}
 				} else if (r.releaseCount === 2) {
 					if (r.numShortPress === 2) {
 						self.buttonPressHandler(r, "DOUBLE_RELEASE");
 					} else {
-						self.buttonTimeouts[r.releaseID] = setTimeout(function(){ self.buttonPressHandler(r, "DOUBLE_RELEASE"); }, r.multiPressTimeout);
+						self.resourceTimers[r.releaseID] = setTimeout(function(){ self.buttonPressHandler(r, "DOUBLE_RELEASE"); }, r.multiPressTimeout);
 					}
 				} else if (r.releaseCount === 3) {
 					self.buttonPressHandler(r, "TRIPPLE_RELEASE");
@@ -323,20 +327,22 @@ module.exports = NodeHelper.create({
 	buttonPressHandler: function(r, actionName) {
 		var self = this;
 		var i, payload;
-		
 		if (self.developerMode) { console.log(self.name + ": buttonPressHandler(): Button \"" + r.name + "\"  Action: \"" + actionName + "\""); }
+		if (!self.buttonActions.includes(actionName)) { return; }
 		
 		if ((actionName === "LONG_PRESS" && !r.clearAlertOnRelease) || (actionName === "LONG_RELEASE" && r.clearAlertOnRelease)) {
 			self.clearAlert(r);
 		}
 		
 		var actions = r[actionName];
-		for (i = 0; i < actions.length; i++) {
-			payload = actions[i];
-			if (payload.action === "NOTIFY") {
-				self.sendSocketNotification("NOTIFY", payload);
-			} else {
-				self.actionHandler(payload);
+		if (axis.isArray(actions)) {
+			for (i = 0; i < actions.length; i++) {
+				payload = actions[i];
+				if (payload.action === "NOTIFY") {
+					self.sendSocketNotification("NOTIFY", payload);
+				} else {
+					self.actionHandler(payload);
+				}
 			}
 		}
 	},
@@ -350,15 +356,17 @@ module.exports = NodeHelper.create({
 	actionHandler: function(payload) {
 		var self = this;
 		var r, objectType, triggerAction;
-		
 		if (self.developerMode) { console.log(self.name + ": actionHandler(): " + JSON.stringify(payload)); }
 		
 		if (!axis.isString(payload.action)) { return false; }
 		payload.action = payload.action.toUpperCase();
 		
-		if (payload.action.indexOf("_SCENE") >= 0) {
+		if (self.sceneActions.includes(payload.action)) {
 			r = self.scenes[payload.name];
 			objectType = "scene";
+		} else if (self.animationActions.includes(payload.action)) {
+			r = self.animations[payload.name];
+			objectType = "animation";
 		} else {
 			r = self.resources[payload.name];
 			objectType = "resource";
@@ -370,34 +378,38 @@ module.exports = NodeHelper.create({
 		}
 		
 		if (r.type === "LED") {
-			self.clearAnimation(r);
+			self.clearResourceTimer(r);
 			switch (payload.action) {
 				case "SET": triggerAction = function() { self.setLED(r, payload.value, payload.masterValue, payload.time); }; break;
 				case "INCREASE": triggerAction = function() { self.increaseLED(r, payload.value, payload.time); }; break;
 				case "DECREASE": triggerAction = function() { self.decreaseLED(r, payload.value, payload.time); }; break;
 				case "TOGGLE": triggerAction = function() { self.toggleLED(r, payload.value, payload.masterValue, payload.time); }; break;
 				case "BLINK": triggerAction = function() { self.blinkLED(r, payload.time, payload.offTime, payload.value, payload.masterValue); }; break;
-				default: return false;
 			}
 		} else if (r.type === "OUT") {
-			self.clearAnimation(r);
+			self.clearResourceTimer(r);
 			switch (payload.action) {
 				case "SET": triggerAction = function() { self.setOUT(r, payload.value); }; break;
 				case "TOGGLE": triggerAction = function() { self.toggleOUT(r, payload.value); }; break;
 				case "BLINK": triggerAction = function() { self.blinkOUT(r, payload.time, payload.offTime, payload.value); }; break;
-				default: return false;
 			}
+		} else if (r.type === "BTN") {
+			if (self.buttonActions.includes(payload.action)) { triggerAction = function() { self.buttonPressHandler(r, payload.action); }; }
 		} else if (r.type === "SCN") {
 			switch (payload.action) {
 				case "SET_SCENE": triggerAction = function() { self.setSCN(r, payload.value, payload.time); }; break;
 				case "INCREASE_SCENE": triggerAction = function() { self.increaseSCN(r, payload.value, payload.time); }; break;
 				case "DECREASE_SCENE": triggerAction = function() { self.decreaseSCN(r, payload.value, payload.time); }; break;
 				case "TOGGLE_SCENE": triggerAction = function() { self.toggleSCN(r, payload.value, payload.time); }; break;
-				default: return false;
 			}
-		} else {
-			return false;
+		} else if (r.type === "ANI") {
+			switch (payload.action) {
+				case "START": triggerAction = function() { self.startANI(r); }; break;
+				case "STOP": triggerAction = function() { self.stopANI(r); }; break;
+			}
 		}
+		
+		if (axis.isUndefined(triggerAction)) { return false; }
 		
 		if (axis.isString(payload.delay)) { payload.delay = Number(payload.delay); }
 		if (axis.isNumber(payload.delay) && !isNaN(payload.delay) && payload.delay > 0) {
@@ -428,32 +440,78 @@ module.exports = NodeHelper.create({
 		
 		payload.action = payload.action.toUpperCase();
 		
-		var type = payload.action.indexOf("_SCENE") >= 0 ? "scene" : "resource";
+		var type = "resource";
+		if (payload.action === "GET_SCENE" || self.sceneActions.includes(payload.action)) { type = "scene"; }
+		else if (payload.action === "GET_ANIMATION" || self.animationActions.includes(payload.action)) { type = "animation"; }
 		
-		if (type === "scene" && axis.isUndefined(self.scenes[payload.name])) {
+		if (payload.action === "GET_ALL") {
+			var data = [];
+			var resourceList = Object.values(self.resources);
+			var sceneList = Object.values(self.scenes);
+			var animationList = Object.values(self.animations);
+			for (i = 0; i < resourceList.length; i++) { data.push(resourceList[i]); }
+			for (i = 0; i < sceneList.length; i++) { data.push(sceneList[i]); }
+			for (i = 0; i < animationList.length; i++) { data.push(animationList[i]); }
+			output = Object.assign({ error: false }, { data: data });
+			res.send(JSON.stringify(output));
+		} else if (type === "scene" && axis.isUndefined(self.scenes[payload.name])) {
 			res.send(JSON.stringify({ error: true, message: "There is no scene assigned to the name: \"" + payload.name + "\"." }));
+		} else if (type === "animation" && axis.isUndefined(self.animations[payload.name])) {
+			res.send(JSON.stringify({ error: true, message: "There is no animation assigned to the name: \"" + payload.name + "\"." }));
 		} else if (type === "resource" && axis.isUndefined(self.resources[payload.name])) {
 			res.send(JSON.stringify({ error: true, message: "There is no resource assigned to the name: \"" + payload.name + "\"." }));
+		} else if (payload.action.substr(0, 3) === "GET" || self.actionHandler(payload)) {
+			if (type === "scene") { output = Object.assign({ error: false }, { data: self.scenes[payload.name] }); }
+			else if (type === "animation") { output = Object.assign({ error: false }, { data: self.animations[payload.name] }); }
+			else if (type === "resource") { output = Object.assign({ error: false }, { data: self.resources[payload.name] }); }
+			res.send(JSON.stringify(output));
 		} else {
-			if (payload.action === "GET_ALL") {
-				var data = [];
-				var resourceList = Object.values(self.resources);
-				var sceneList = Object.values(self.scenes);
-				for (i = 0; i < resourceList.length; i++) { data.push(resourceList[i]); }
-				for (i = 0; i < sceneList.length; i++) { data.push(sceneList[i]); }
-				output = Object.assign({ error: false }, { data: data });
-				res.send(JSON.stringify(output));
-			} else if (payload.action === "GET" || payload.action === "GET_SCENE" || self.actionHandler(payload)) {
-				if (type === "scene") {
-					output = Object.assign({ error: false }, { data: self.scenes[payload.name] });
-				} else if (type === "resource") {
-					output = Object.assign({ error: false }, { data: self.resources[payload.name] });
-				}
-				res.send(JSON.stringify(output));
-			} else {
-				res.send(JSON.stringify({ error: true, message: "The action \"" + payload.action + "\" is not valid." }));
-			}
+			res.send(JSON.stringify({ error: true, message: "The action \"" + payload.action + "\" is not valid." }));
 		}
+	},
+	
+	/**
+	 * Start the animation
+	 * 
+	 * @param a (object) The animation configuration object
+	 */
+	startANI: function(a) {
+		var self = this;
+		if ((!self.initializedOnOff && !self.initializedLED) || a.running) { return; }
+		if (self.developerMode) { console.log(self.name + ": startANI(): Name: \"" + a.name + "\""); }
+		
+		var activateFrame, frame, i;
+		var nextFrameID = 0;
+		a.running = true;
+		
+		activateFrame = function() {
+			if (a.running) {
+				frame = a.frames[nextFrameID];
+				nextFrameID++;
+				for (i = 0; i < frame.actions.length; i++) { self.actionHandler(frame.actions[i]); }
+				if (nextFrameID === a.frames.length && a.repeat) { nextFrameID = 0; }
+				if (nextFrameID < a.frames.length) { self.animationTimers[a.name] = setTimeout(activateFrame, frame.time); }
+			}
+		};
+		
+		activateFrame();
+		
+	},
+	
+	/**
+	 * Start the animation
+	 * 
+	 * @param a (object) The animation configuration object
+	 */
+	stopANI: function(a) {
+		var self = this;
+		if (!self.initializedOnOff && !self.initializedLED) { return; }
+		if (self.developerMode) { console.log(self.name + ": stopANI(): Name: \"" + a.name + "\""); }
+		
+		a.running = false;
+		clearTimeout(self.animationTimers[a.name]);
+		delete self.animationTimers[a.name];
+		
 	},
 	
 	/**
@@ -546,16 +604,16 @@ module.exports = NodeHelper.create({
 	},
 	
 	/**
-	 * The clearAnimation function clears any animation that might be runnig on a given resource.
+	 * The clearResourceTimer function clears any timed effect that might be runnig on a given resource.
 	 * 
 	 * @param r (object) The resource object
 	 */
-	clearAnimation: function(r) {
+	clearResourceTimer: function(r) {
 		var self = this;
-		if (axis.isObject(r)) {
-			clearTimeout(self.animations[r.name]);
-			clearInterval(self.animations[r.name]);
-			delete self.animations[r.name];
+		if (axis.isObject(r) && axis.isString(r.name)) {
+			clearTimeout(self.resourceTimers[r.name]);
+			clearInterval(self.resourceTimers[r.name]);
+			delete self.resourceTimers[r.name];
 		}
 	},
 	
@@ -618,7 +676,7 @@ module.exports = NodeHelper.create({
 			var blinkTime = offTime;
 			if (r.value === 0) { blinkTime = time; }
 			self.toggleOUT(r, value);
-			self.animations[r.name] = setTimeout(function(){ blink(); }, blinkTime);
+			self.resourceTimers[r.name] = setTimeout(function(){ blink(); }, blinkTime);
 		};
 		
 		blink();
@@ -669,7 +727,7 @@ module.exports = NodeHelper.create({
 
 			if (self.developerMode) { console.log(self.name + ":  -->  stepTime: \"" + stepTime + "\" stepSize: \"" + stepSize + "\" numSteps: \"" + numSteps + "\""); }
 
-			self.animations[r.name] = setInterval(function(){
+			self.resourceTimers[r.name] = setInterval(function(){
 				var newValue = r.value + stepSize;
 				if (isDecreasing) {
 					newValue = r.value - stepSize;
@@ -682,7 +740,7 @@ module.exports = NodeHelper.create({
 				if (r.activeLow) { newValue = 1 - newValue; }
 				piBlaster.setPwm(r.pin, newValue);
 				
-				if (newValue === value) { clearInterval(self.animations[r.name]); }
+				if (newValue === value) { clearInterval(self.resourceTimers[r.name]); }
 			}, stepTime);
 			
 		}
@@ -775,7 +833,7 @@ module.exports = NodeHelper.create({
 			var blinkTime = offTime;
 			if (r.value === 0) { blinkTime = time; }
 			self.toggleLED(r, value, masterValue);
-			self.animations[r.name] = setTimeout(function(){ blink(); }, blinkTime);
+			self.resourceTimers[r.name] = setTimeout(function(){ blink(); }, blinkTime);
 		};
 		
 		blink();
@@ -786,16 +844,18 @@ module.exports = NodeHelper.create({
 	 */
 	stop: function() {
 		var self = this;
+		var i;
 		console.log(self.name + ": Stopping module helper. ");
-		// Stop the pi-blaster instance(s) that is/are running
-		if (self.initializedLED) {
-			exec("sudo pkill " + self.processName, { timeout: 1500 }, function(error, stdout, stderr) { });
-		}
 		var resourceList = Object.values(self.resources);
-		for (var i = 0; i < resourceList.length; i++) {
+		// Stop running animations
+		var runningAnimations = Object.keys(self.animationTimers);
+		for (i = 0; i < runningAnimations.length; i++) { clearTimeout(runningAnimations[i]); }
+		// Release resources
+		for (i = 0; i < resourceList.length; i++) {
 			var r = resourceList[i];
+			self.clearResourceTimer(r);
 			if (r.type === "LED") {
-				//if (!axis.isNull(r.exitValue)) { self.setLED(r.name, r.exitValue); }
+				// LED specific release actions to go here
 			} else if (r.type === "OUT") {
 				if (self.developerMode) { console.log(self.name + ": stop(): Releasing resource (Output): \"" + r.name + "\" pin: \"" + r.pin + "\". "); }
 				self.onoff[r.name].unexport();
@@ -803,6 +863,10 @@ module.exports = NodeHelper.create({
 				if (self.developerMode) { console.log(self.name + ": stop(): Releasing resource (Button): \"" + r.name + "\" pin: \"" + r.pin + "\". "); }
 				self.onoff[r.name].unexport();
 			}
+		}
+		// Stop the pi-blaster instance(s) that is/are running
+		if (self.initializedLED) {
+			exec("sudo pkill " + self.processName, { timeout: 1500 }, function(error, stdout, stderr) { });
 		}
 	}
 	
