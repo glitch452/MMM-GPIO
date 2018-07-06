@@ -24,6 +24,7 @@ Module.register("MMM-GPIO", {
 		outputs: [],
 		scenes: [],
 		animations: [],
+		triggers: [],
 		pinScheme: "BCMv2",
 		activeLow: false,
 		debounceTimeout: 8,
@@ -52,6 +53,7 @@ Module.register("MMM-GPIO", {
 		self.resources = {};
 		self.scenes = {};
 		self.animations = {};
+		self.triggers = {};
 		self.pinList = [];
 		self.nameList = [];
 		self.validPinSchemes = [ "BCMv1", "BCMv2" ];
@@ -119,12 +121,15 @@ Module.register("MMM-GPIO", {
 		for (i = 0; i < self.config.scenes.length; i++) { self.addScene(self.config.scenes[i]); }
 		// Add the animations
 		for (i = 0; i < self.config.animations.length; i++) { self.addAnimation(self.config.animations[i]); }
+		// Add the triggers
+		for (i = 0; i < self.config.triggers.length; i++) { self.addTrigger(self.config.triggers[i]); }
 		
 		self.log(("start(): self.data: " + JSON.stringify(self.data)), "dev");
 		self.log(("start(): self.config: " + JSON.stringify(self.config)), "dev");
 		self.log(("start(): self.resources: " + JSON.stringify(self.resources)), "dev");
 		self.log(("start(): self.scenes: " + JSON.stringify(self.scenes)), "dev");
 		self.log(("start(): self.animations: " + JSON.stringify(self.animations)), "dev");
+		self.log(("start(): self.triggers: " + JSON.stringify(self.triggers)), "dev");
 		
 		self.sendSocketNotification("INIT", {
 			instanceID: self.instanceID,
@@ -329,7 +334,7 @@ Module.register("MMM-GPIO", {
 		
 		if (!axis.isObject(a) || !axis.isString(a.action) || a.action.length < 1) { return singleMode ? null : []; }
 		a.action = a.action.toUpperCase();
-		if	(	( a.action !== "STOP_ALL" && (!axis.isString(a.name) || a.name.length < 1) ) ||
+		if	(	( a.action !== "STOP_ALL" && a.action !== "NOTIFY" && (!axis.isString(a.name) || a.name.length < 1) ) ||
 				( a.action === "NOTIFY" && (!axis.isString(a.notification) || a.notification.length < 1) )
 			) { return singleMode ? null : []; }
 		

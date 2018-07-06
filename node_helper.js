@@ -326,25 +326,13 @@ module.exports = NodeHelper.create({
 	 */
 	buttonPressHandler: function(r, actionName) {
 		var self = this;
-		var i, payload;
 		if (self.developerMode) { console.log(self.name + ": buttonPressHandler(): Button \"" + r.name + "\"  Action: \"" + actionName + "\""); }
 		if (!self.buttonActions.includes(actionName)) { return; }
 		
 		if ((actionName === "LONG_PRESS" && !r.clearAlertOnRelease) || (actionName === "LONG_RELEASE" && r.clearAlertOnRelease)) {
 			self.clearAlert(r);
 		}
-		
-		var actions = r[actionName];
-		if (axis.isArray(actions)) {
-			for (i = 0; i < actions.length; i++) {
-				payload = actions[i];
-				if (payload.action === "NOTIFY") {
-					self.sendSocketNotification("NOTIFY", payload);
-				} else {
-					self.actionHandler(payload);
-				}
-			}
-		}
+		self.actionHandler(r[actionName]);
 	},
 	
 	/**
@@ -367,53 +355,57 @@ module.exports = NodeHelper.create({
 		if (!axis.isObject(payload) || !axis.isString(payload.action)) { return false; }
 		payload.action = payload.action.toUpperCase();
 		
-		if (self.sceneActions.includes(payload.action)) {
-			r = self.scenes[payload.name];
-			objectType = "scene";
-		} else if (self.animationActions.includes(payload.action)) {
-			r = self.animations[payload.name];
-			if (axis.isUndefined(r)) { r = { type: "ANI" }; }
-			objectType = "animation";
+		if (payload.action === "NOTIFY") {
+			triggerAction = function() { self.sendSocketNotification("NOTIFY", payload); };
+		} else if (payload.action === "STOP_ALL") {
+			triggerAction = function() { self.stopAllANI(); };
 		} else {
-			r = self.resources[payload.name];
-			objectType = "resource";
-		}
-		
-		if (axis.isUndefined(r)) {
-			 console.log(self.name + ": actionHandler(): There is no " + objectType + " assigned to the name: \"" + payload.name + "\"." );
-			 return false;
-		}
-		
-		if (r.type === "LED") {
-			self.clearResourceTimer(r);
-			switch (payload.action) {
-				case "SET": triggerAction = function() { self.setLED(r, payload.value, payload.masterValue, payload.time); }; break;
-				case "INCREASE": triggerAction = function() { self.increaseLED(r, payload.value, payload.time); }; break;
-				case "DECREASE": triggerAction = function() { self.decreaseLED(r, payload.value, payload.time); }; break;
-				case "TOGGLE": triggerAction = function() { self.toggleLED(r, payload.value, payload.masterValue, payload.time); }; break;
-				case "BLINK": triggerAction = function() { self.blinkLED(r, payload.time, payload.offTime, payload.value, payload.masterValue); }; break;
+			if (self.sceneActions.includes(payload.action)) {
+				r = self.scenes[payload.name];
+				objectType = "scene";
+			} else if (self.animationActions.includes(payload.action)) {
+				r = self.animations[payload.name];
+				objectType = "animation";
+			} else {
+				r = self.resources[payload.name];
+				objectType = "resource";
 			}
-		} else if (r.type === "OUT") {
-			self.clearResourceTimer(r);
-			switch (payload.action) {
-				case "SET": triggerAction = function() { self.setOUT(r, payload.value); }; break;
-				case "TOGGLE": triggerAction = function() { self.toggleOUT(r, payload.value); }; break;
-				case "BLINK": triggerAction = function() { self.blinkOUT(r, payload.time, payload.offTime, payload.value); }; break;
+
+			if (axis.isUndefined(r)) {
+				 console.log(self.name + ": actionHandler(): There is no " + objectType + " assigned to the name: \"" + payload.name + "\"." );
+				 return false;
 			}
-		} else if (r.type === "BTN") {
-			if (self.buttonActions.includes(payload.action)) { triggerAction = function() { self.buttonPressHandler(r, payload.action); }; }
-		} else if (r.type === "SCN") {
-			switch (payload.action) {
-				case "SET_SCENE": triggerAction = function() { self.setSCN(r, payload.value, payload.time); }; break;
-				case "INCREASE_SCENE": triggerAction = function() { self.increaseSCN(r, payload.value, payload.time); }; break;
-				case "DECREASE_SCENE": triggerAction = function() { self.decreaseSCN(r, payload.value, payload.time); }; break;
-				case "TOGGLE_SCENE": triggerAction = function() { self.toggleSCN(r, payload.value, payload.time); }; break;
-			}
-		} else if (r.type === "ANI") {
-			switch (payload.action) {
-				case "START": triggerAction = function() { self.startANI(r); }; break;
-				case "STOP": triggerAction = function() { self.stopANI(r); }; break;
-				case "STOP_ALL": triggerAction = function() { self.stopAllANI(); }; break;
+
+			if (r.type === "LED") {
+				self.clearResourceTimer(r);
+				switch (payload.action) {
+					case "SET": triggerAction = function() { self.setLED(r, payload.value, payload.masterValue, payload.time); }; break;
+					case "INCREASE": triggerAction = function() { self.increaseLED(r, payload.value, payload.time); }; break;
+					case "DECREASE": triggerAction = function() { self.decreaseLED(r, payload.value, payload.time); }; break;
+					case "TOGGLE": triggerAction = function() { self.toggleLED(r, payload.value, payload.masterValue, payload.time); }; break;
+					case "BLINK": triggerAction = function() { self.blinkLED(r, payload.time, payload.offTime, payload.value, payload.masterValue); }; break;
+				}
+			} else if (r.type === "OUT") {
+				self.clearResourceTimer(r);
+				switch (payload.action) {
+					case "SET": triggerAction = function() { self.setOUT(r, payload.value); }; break;
+					case "TOGGLE": triggerAction = function() { self.toggleOUT(r, payload.value); }; break;
+					case "BLINK": triggerAction = function() { self.blinkOUT(r, payload.time, payload.offTime, payload.value); }; break;
+				}
+			} else if (r.type === "BTN") {
+				if (self.buttonActions.includes(payload.action)) { triggerAction = function() { self.buttonPressHandler(r, payload.action); }; }
+			} else if (r.type === "SCN") {
+				switch (payload.action) {
+					case "SET_SCENE": triggerAction = function() { self.setSCN(r, payload.value, payload.time); }; break;
+					case "INCREASE_SCENE": triggerAction = function() { self.increaseSCN(r, payload.value, payload.time); }; break;
+					case "DECREASE_SCENE": triggerAction = function() { self.decreaseSCN(r, payload.value, payload.time); }; break;
+					case "TOGGLE_SCENE": triggerAction = function() { self.toggleSCN(r, payload.value, payload.time); }; break;
+				}
+			} else if (r.type === "ANI") {
+				switch (payload.action) {
+					case "START": triggerAction = function() { self.startANI(r); }; break;
+					case "STOP": triggerAction = function() { self.stopANI(r); }; break;
+				}
 			}
 		}
 		
@@ -468,7 +460,7 @@ module.exports = NodeHelper.create({
 			res.send(JSON.stringify({ error: true, message: "There is no animation assigned to the name: \"" + payload.name + "\"." }));
 		} else if (type === "resource" && axis.isUndefined(self.resources[payload.name])) {
 			res.send(JSON.stringify({ error: true, message: "There is no resource assigned to the name: \"" + payload.name + "\"." }));
-		} else if (payload.action.substr(0, 3) === "GET" || self.actionHandler(payload)) {
+		} else if (payload.action !== "NOTIFY" && (payload.action.substr(0, 3) === "GET" || self.actionHandler(payload))) {
 			if (type === "scene") { output = Object.assign({ error: false }, { data: self.scenes[payload.name] }); }
 			else if (type === "animation") { output = Object.assign({ error: false }, { data: self.animations[payload.name] }); }
 			else if (type === "resource") { output = Object.assign({ error: false }, { data: self.resources[payload.name] }); }
