@@ -44,7 +44,7 @@ module.exports = NodeHelper.create({
 		self.onoff = {};
 		self.buttonActions = [ "PRESS", "DOUBLE_PRESS", "TRIPPLE_PRESS", "RELEASE", "DOUBLE_RELEASE", "TRIPPLE_RELEASE", "LONG_PRESS", "LONG_RELEASE"];
 		self.sceneActions = [ "SET_SCENE", "INCREASE_SCENE", "DECREASE_SCENE", "TOGGLE_SCENE" ];
-		self.animationActions = [ "START", "STOP" ];
+		self.animationActions = [ "START", "STOP", "STOP_ALL" ];
 		
 		this.expressApp.get("/" + self.name, function(req, res) { self.getHandler(req, res); });
 		
@@ -355,10 +355,16 @@ module.exports = NodeHelper.create({
 	 */
 	actionHandler: function(payload) {
 		var self = this;
-		var r, objectType, triggerAction;
+		var r, i, objectType, triggerAction;
+		
 		if (self.developerMode) { console.log(self.name + ": actionHandler(): " + JSON.stringify(payload)); }
 		
-		if (!axis.isString(payload.action)) { return false; }
+		if (axis.isArray(payload)) {
+			for (i = 0; i < payload.length; i++) { self.actionHandler(payload[i]); }
+			return;
+		}
+		
+		if (!axis.isObject(payload) || !axis.isString(payload.action)) { return false; }
 		payload.action = payload.action.toUpperCase();
 		
 		if (self.sceneActions.includes(payload.action)) {
@@ -366,6 +372,7 @@ module.exports = NodeHelper.create({
 			objectType = "scene";
 		} else if (self.animationActions.includes(payload.action)) {
 			r = self.animations[payload.name];
+			if (axis.isUndefined(r)) { r = { type: "ANI" }; }
 			objectType = "animation";
 		} else {
 			r = self.resources[payload.name];
@@ -406,6 +413,7 @@ module.exports = NodeHelper.create({
 			switch (payload.action) {
 				case "START": triggerAction = function() { self.startANI(r); }; break;
 				case "STOP": triggerAction = function() { self.stopANI(r); }; break;
+				case "STOP_ALL": triggerAction = function() { self.stopAllANI(); }; break;
 			}
 		}
 		
@@ -456,7 +464,7 @@ module.exports = NodeHelper.create({
 			res.send(JSON.stringify(output));
 		} else if (type === "scene" && axis.isUndefined(self.scenes[payload.name])) {
 			res.send(JSON.stringify({ error: true, message: "There is no scene assigned to the name: \"" + payload.name + "\"." }));
-		} else if (type === "animation" && axis.isUndefined(self.animations[payload.name])) {
+		} else if (type === "animation" && payload.action !== "STOP_ALL" && axis.isUndefined(self.animations[payload.name])) {
 			res.send(JSON.stringify({ error: true, message: "There is no animation assigned to the name: \"" + payload.name + "\"." }));
 		} else if (type === "resource" && axis.isUndefined(self.resources[payload.name])) {
 			res.send(JSON.stringify({ error: true, message: "There is no resource assigned to the name: \"" + payload.name + "\"." }));
@@ -477,10 +485,12 @@ module.exports = NodeHelper.create({
 	 */
 	startANI: function(a) {
 		var self = this;
-		if ((!self.initializedOnOff && !self.initializedLED) || a.running) { return; }
+		if ((!self.initializedOnOff && !self.initializedLED) || a.running || a.frames.length < 1) { return; }
 		if (self.developerMode) { console.log(self.name + ": startANI(): Name: \"" + a.name + "\""); }
 		
-		var activateFrame, frame, i;
+		self.actionHandler(a.preStartActions);
+		
+		var activateFrame, frame;
 		var nextFrameID = 0;
 		a.running = true;
 		
@@ -488,7 +498,7 @@ module.exports = NodeHelper.create({
 			if (a.running) {
 				frame = a.frames[nextFrameID];
 				nextFrameID++;
-				for (i = 0; i < frame.actions.length; i++) { self.actionHandler(frame.actions[i]); }
+				self.actionHandler(frame.actions);
 				if (nextFrameID === a.frames.length && a.repeat) { nextFrameID = 0; }
 				if (nextFrameID < a.frames.length) { self.animationTimers[a.name] = setTimeout(activateFrame, frame.time); }
 			}
@@ -499,7 +509,7 @@ module.exports = NodeHelper.create({
 	},
 	
 	/**
-	 * Start the animation
+	 * Stop the animation
 	 * 
 	 * @param a (object) The animation configuration object
 	 */
@@ -508,10 +518,27 @@ module.exports = NodeHelper.create({
 		if (!self.initializedOnOff && !self.initializedLED) { return; }
 		if (self.developerMode) { console.log(self.name + ": stopANI(): Name: \"" + a.name + "\""); }
 		
-		a.running = false;
-		clearTimeout(self.animationTimers[a.name]);
-		delete self.animationTimers[a.name];
+		if (a.running) {
+			a.running = false;
+			clearTimeout(self.animationTimers[a.name]);
+			delete self.animationTimers[a.name];
+			self.actionHandler(a.onStopActions);
+		}
+	},
+	
+	/**
+	 * Stop all running animations
+	 */
+	stopAllANI: function() {
+		var self = this;
+		if (!self.initializedOnOff && !self.initializedLED) { return; }
+		if (self.developerMode) { console.log(self.name + ": stopAllANI()"); }
 		
+		var animationNames = Object.keys(self.animationTimers);
+		
+		for (var i = 0; i < animationNames.length; i++) {
+			self.stopANI(self.animations[animationNames[i]]);
+		}
 	},
 	
 	/**
@@ -709,11 +736,11 @@ module.exports = NodeHelper.create({
 		if (time === 0) {
 			
 			r.value = value;
-			if (r.activeLow) { value = 1 - value; }
-			piBlaster.setPwm(r.pin, value);
+			piBlaster.setPwm(r.pin, r.activeLow ? 1 - value : value);
 			
 		} else {
 			
+			var newValue = r.value;
 			var isDecreasing = value < r.value ? true : false;
 			var stepTime = 15;
 			var numSteps = Math.ceil(time / stepTime);
@@ -724,21 +751,20 @@ module.exports = NodeHelper.create({
 				numSteps = Math.ceil(valueChange / stepSize);
 				stepTime = Math.round(time / numSteps);
 			}
-
+			
 			if (self.developerMode) { console.log(self.name + ":  -->  stepTime: \"" + stepTime + "\" stepSize: \"" + stepSize + "\" numSteps: \"" + numSteps + "\""); }
-
+			
 			self.resourceTimers[r.name] = setInterval(function(){
-				var newValue = r.value + stepSize;
 				if (isDecreasing) {
-					newValue = r.value - stepSize;
+					newValue -= stepSize;
 					if (newValue < value) { newValue = value; }
 				} else {
+					newValue += stepSize;
 					if (newValue > value) { newValue = value; }
 				}
 				
 				r.value = newValue;
-				if (r.activeLow) { newValue = 1 - newValue; }
-				piBlaster.setPwm(r.pin, newValue);
+				piBlaster.setPwm(r.pin, r.activeLow ? 1 - newValue : newValue);
 				
 				if (newValue === value) { clearInterval(self.resourceTimers[r.name]); }
 			}, stepTime);
@@ -848,8 +874,7 @@ module.exports = NodeHelper.create({
 		console.log(self.name + ": Stopping module helper. ");
 		var resourceList = Object.values(self.resources);
 		// Stop running animations
-		var runningAnimations = Object.keys(self.animationTimers);
-		for (i = 0; i < runningAnimations.length; i++) { clearTimeout(runningAnimations[i]); }
+		self.stopAllANI();
 		// Release resources
 		for (i = 0; i < resourceList.length; i++) {
 			var r = resourceList[i];

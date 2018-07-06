@@ -145,7 +145,7 @@ Module.register("MMM-GPIO", {
 	 */
 	addResource: function(type, resource) {
 		var self = this;
-		var i, k, pin, typeFull, triggerName, actionName, actions, action;
+		var i, pin, typeFull, triggerName, actionName;
 		
 		switch (type) {
 			case "LED": typeFull = "LED"; break;
@@ -211,22 +211,7 @@ Module.register("MMM-GPIO", {
 			for (i = 0; i < self.validTriggers.length; i++) {
 				triggerName = self.validTriggers[i];
 				actionName = self.triggerActionMapping[triggerName];
-				result[actionName] = [];
-				actions = resource[triggerName];
-				
-				if (axis.isUndefined(actions)) { continue; }
-				if (!axis.isArray(actions)) { actions = [ actions ]; }
-				
-				for (k = 0; k < actions.length; k++) {
-					action = actions[k];
-					if (!axis.isString(action.action) || action.action.length < 1) { continue; }
-					if (action.action === "NOTIFY") {
-						if (!axis.isString(action.notification)) { continue; }
-					} else {
-						if (!axis.isString(action.name)) { continue; }
-					}
-					result[actionName].push(action);
-				}
+				result[actionName] = self.validateActions(resource[triggerName]);
 			}
 			
 			if (result.TRIPPLE_PRESS.length > 0 || result.TRIPPLE_RELEASE.length > 0) { result.numShortPress = 3; }
@@ -254,25 +239,17 @@ Module.register("MMM-GPIO", {
 	 */
 	addScene: function(scene) {
 		var self = this;
-		var i, action;
 		
 		if (!axis.isString(scene.name) || scene.name.length < 1) {
 			self.log(("A name has not been provided.  The scene cannot be initialized. "), "warn");
 			return;
 		}
 		
-		var result = { type: "SCN", name: scene.name, actions: [] };
+		var result = { type: "SCN", name: scene.name };
 		
-		if (!axis.isArray(scene.actions)) { scene.actions = [ scene.actions ]; }
+		result.actions = self.validateActions(scene.actions);
 		
-		for (i = 0; i < scene.actions.length; i++) {
-			action = scene.actions[i];
-			if (!axis.isString(action.action) || action.action.length < 1) { continue; }
-			if (!axis.isString(action.name) || action.name.length < 1) { continue; }
-			result.actions.push(action);
-		}
-		
-		if (axis.isUndefined(result.actions)) {
+		if (result.actions.length < 1) {
 			self.log(("No valid actions have been provided.  The scene cannot be initialized. "), "warn");
 			return;
 		}
@@ -293,7 +270,7 @@ Module.register("MMM-GPIO", {
 	 */
 	addAnimation: function(animation) {
 		var self = this;
-		var i, k, action, frame, frame_result;
+		var i, frame, frame_result;
 		
 		if (!axis.isString(animation.name) || animation.name.length < 1) {
 			self.log(("A name has not been provided.  The animation cannot be initialized. "), "warn");
@@ -305,26 +282,14 @@ Module.register("MMM-GPIO", {
 		if (!axis.isArray(animation.frames)) { animation.frames = [ animation.frames ]; }
 		
 		for (i = 0; i < animation.frames.length; i++) {
-			
 			frame = animation.frames[i];
-			frame_result = { actions: [] };
-			
-			if (!axis.isArray(frame.actions)) { frame.actions = [ frame.actions ]; }
-			
-			for (k = 0; k < frame.actions.length; k++) {
-				action = frame.actions[k];
-				if (!axis.isString(action.action) || action.action.length < 1) { continue; }
-				if (!axis.isString(action.name) || action.name.length < 1) { continue; }
-				frame_result.actions.push(action);
-			}
-			
+			frame_result = { actions: self.validateActions(frame.actions) };
 			if (frame_result.actions.length > 0) {
 				if (!axis.isNumber(frame.time) || isNaN(frame.time)) { frame.time = 1000; }
 				if (frame.time < 0) { frame.time = 0; }
 				frame_result.time = frame.time;
 				result.frames.push(frame_result);
 			}
-			
 		}
 		
 		if (axis.isUndefined(result.frames)) {
@@ -334,8 +299,41 @@ Module.register("MMM-GPIO", {
 		
 		result.repeat = animation.repeat === true ? true : false;
 		result.running = false;
+		result.preStartActions = self.validateActions(animation.preStartActions);
+		result.onStopActions = self.validateActions(animation.onStopActions);
 		
 		self.animations[animation.name] = result;
+	},
+	
+	/**
+	 * Validate the provided action(s)
+	 * 
+	 * @param a (object|array) The action object to validate
+	 * @param singleMode (boolean) If true, and 'a' is not an array, a single object is returned, otherwise the object is returned in an array
+	 * @return (object|null|array) Returns an array of the given valid action(s).  When in singleMode, returns the action, if valid, otherwise null
+	 */
+	validateActions: function(a, singleMode) {
+		var self = this;
+		
+		if (axis.isArray(a)) {
+			var actions = [];
+			for (var i = 0; i < a.length; i++) {
+				if (axis.isArray(a[i])) { continue; }
+				a[i] = self.validateActions(a[i], true);
+				if (!axis.isNull(a[i])) { actions.push(a[i]); }
+			}
+			return actions;
+		}
+		
+		if (singleMode !== true) { singleMode = false; }
+		
+		if (!axis.isObject(a) || !axis.isString(a.action) || a.action.length < 1) { return singleMode ? null : []; }
+		a.action = a.action.toUpperCase();
+		if	(	( a.action !== "STOP_ALL" && (!axis.isString(a.name) || a.name.length < 1) ) ||
+				( a.action === "NOTIFY" && (!axis.isString(a.notification) || a.notification.length < 1) )
+			) { return singleMode ? null : []; }
+		
+		return singleMode ? a : [ a ];
 	},
 	
 	/**
