@@ -80,6 +80,7 @@ module.exports = NodeHelper.create({
 		if (self.initializedLED || self.initializedOnOff) {
 			self.sendSocketNotification("LOG", { original: payload, message: ("node_helper.js has already been initialized."), messageType: "dev" } );
 			if (payload.developerMode) { console.log(self.name + ": node_helper.js has already been initialized."); }
+			self.sendSocketNotification("INIT");
 		} else if (resourceList.length >= 1) {
 			self.developerMode = payload.developerMode;
 			self.resources = payload.resources;
@@ -111,13 +112,12 @@ module.exports = NodeHelper.create({
 			if (!error) {
 				self.sendSocketNotification("LOG", { original: null, message: ("Starting PiBlaster... Successfully started PiBlaster on GPIO pin(s) " + gpio + ".") } );
 				console.log(self.name + ": Starting PiBlaster... Successfully started PiBlaster on GPIO pin(s) " + gpio + ".");
+				self.initializedLED = true;
 				self.setInitialValues();
 				self.processName = piBlasterExe.substr(piBlasterExe.lastIndexOf("/") + 1);
-				if (self.developerMode) { self.sendSocketNotification("LOG", { original: null, message: ("node_helper.js initialized successfully."), messageType: "dev" } ); }
 			} else {
 				self.sendSocketNotification("LOG", { original: null, message: ("Starting PiBlaster... Error: " + error) } );
 				console.log(self.name + ": Starting PiBlaster... " + error);
-				if (self.developerMode) { self.sendSocketNotification("LOG", { original: null, message: ("Unable to initialize node_helper.js."), messageType: "dev" } ); }
 			}
 			self.initOnOff();
 		});
@@ -130,7 +130,6 @@ module.exports = NodeHelper.create({
 	setInitialValues: function() {
 		var self = this;
 		var resourceList = Object.keys(self.resources);
-		self.initializedLED = true;
 		for (var i = 0; i < resourceList.length; i++) {
 			var r = self.resources[resourceList[i]];
 			if (r.type === "LED") {
@@ -147,6 +146,7 @@ module.exports = NodeHelper.create({
 	initOnOff: function() {
 		var self = this;
 		var i, r, options;
+		var initializedOnOff = false;
 		
 		self.sendSocketNotification("LOG", { original: null, message: ("Initializing Buttons and/or Outputs.") } );
 		console.log(self.name + ": Initializing Buttons and/or Outputs.");
@@ -156,7 +156,7 @@ module.exports = NodeHelper.create({
 			r = self.resources[resourceList[i]];
 			if (r.type === "OUT") {
 				if (self.developerMode) { console.log(self.name + ": Initializing resource (Output) \"" + r.name + "\" on pin \"" + r.pin + "\"."); }
-				self.initializedOnOff = true;
+				initializedOnOff = true;
 				self.onoff[r.name] = new Gpio(r.pin, "out");
 				self.setOUT(r, r.value);
 			} else if (r.type === "BTN") {
@@ -165,7 +165,7 @@ module.exports = NodeHelper.create({
 					continue;
 				}
 				if (self.developerMode) { console.log(self.name + ": Initializing resource (Button) \"" + r.name + "\" on pin \"" + r.pin + "\"."); }
-				self.initializedOnOff = true;
+				initializedOnOff = true;
 				r.pressCount = 0;
 				r.releaseCount = 0;
 				r.isPressed = false;
@@ -180,9 +180,11 @@ module.exports = NodeHelper.create({
 				self.onoff[r.name] = new Gpio(r.pin, "in", "both", options);
 				// Add the interrupt callback
 				self.onoff[r.name].watch(self.watchHandler(r));
-				
 			}
 		}
+		self.initializedOnOff = initializedOnOff;
+		if (self.developerMode) { self.sendSocketNotification("LOG", { original: null, message: ("node_helper.js initialization complete."), messageType: "dev" } ); }
+		if (self.initializedLED || self.initializedOnOff) { self.sendSocketNotification("INIT"); }
 	},
 	
 	/**

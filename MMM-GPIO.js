@@ -48,12 +48,13 @@ Module.register("MMM-GPIO", {
 	start: function() {
 		var self = this;
 		var i;
+		self.initialized = false;
 		self.instanceID = self.identifier + "_" + Math.random().toString().substring(2);
 		self.defaults.scriptPath = self.data.path + "pi-blaster";
 		self.resources = {};
 		self.scenes = {};
 		self.animations = {};
-		self.triggers = {};
+		self.triggers = [];
 		self.pinList = [];
 		self.nameList = [];
 		self.validPinSchemes = [ "BCMv1", "BCMv2" ];
@@ -311,6 +312,18 @@ Module.register("MMM-GPIO", {
 	},
 	
 	/**
+	 * Validate the provided trigger and add it to the triggers list
+	 * 
+	 * @param trigger (object) The trigger to validate
+	 */
+	addTrigger: function(trigger) {
+		var self = this;
+		if (!axis.isObject(trigger)) { return; }
+		trigger.actions = self.validateActions(trigger.actions);
+		if (trigger.actions.length > 0) { self.triggers.push(trigger); }
+	},
+	
+	/**
 	 * Validate the provided action(s)
 	 * 
 	 * @param a (object|array) The action object to validate
@@ -373,6 +386,8 @@ Module.register("MMM-GPIO", {
 				else { self.log(payload.message, payload.logType); }
 			} else if (notification === "NOTIFY") {
 				self.sendNotification(payload.notification, payload.payload);
+			} else if (notification === "INIT") {
+				self.initialized = true;
 			}
 			return;
 		}
@@ -399,14 +414,69 @@ Module.register("MMM-GPIO", {
 	 */
 	notificationReceived: function(notification, payload, sender) {
 		var self = this;
-		if (sender) { // If the notification is coming from another module
-			
-			self.log(("notificationReceived(): " + notification + " " + JSON.stringify(payload) + " " + sender.name), "dev");
+		var senderName = axis.isObject(sender) ? sender.name : "undefined";
+		self.log(("notificationReceived(): " + notification + " " + JSON.stringify(payload) + " " + senderName), "dev");
+		
+		if (!self.initialized) { return; }
+		
+		if (axis.isObject(sender)) { // If the notification is coming from another module
 			
 			if (notification === "GPIO_ACTION") {
 				self.sendSocketNotification(notification, payload);
 			}
 		}
+		
+		// Take action on the defined triggers that match the notification parameters
+		for (var i = 0; i < self.triggers.length; i++) {
+			var trigger = self.triggers[i];
+			var notificationMatch, payloadMatch, senderMatch;
+			notificationMatch = payloadMatch = senderMatch = false;
+			
+			if (axis.isUndefined(trigger.notification) || self.deepCompare(trigger.notification, notification)) { notificationMatch = true; }
+			if (axis.isUndefined(trigger.sender) || self.deepCompare(trigger.sender, senderName)) { senderMatch = true; }
+			if (axis.isUndefined(trigger.payload) || self.deepCompare(trigger.payload, payload)) { payloadMatch = true; }
+			
+			if (notificationMatch && payloadMatch && senderMatch) {
+				for (var k = 0; k < trigger.actions.length; k++) {
+					if (trigger.actions[k].action === "NOTIFY") { self.sendNotification(payload.notification, payload.payload); }
+					else { self.sendSocketNotification("GPIO_ACTION", trigger.actions[k]); }
+				}
+			}
+		}
+	},
+	
+	/**
+	 * Recursively compare two variables to see if they have the same 'value'
+	 * Objects are considered qeual if the properties in the first object are also contained in the second. 
+	 * 
+	 * @param x (any) The first variable to compare
+	 * @param y (any) The second variable to compare
+	 * @return (boolean) true if the objects are considered 'equal' in 'value', false otherwise
+	 */
+	deepCompare: function(x, y) {
+		var self = this;
+		
+		// If both references point to the same object or both primitives are equivalent
+		if (x === y) { return true; }
+		
+		// For the following special types, use string representation to compare 'values'
+		if	(	( axis.isFunction(x) && axis.isFunction(y) ) ||
+				( axis.isDate(x) && axis.isDate(y) ) ||
+				( axis.isRegExp(x) && axis.isRegExp(y) ) ||
+				( axis.isString(x) && axis.isString(y) ) || // Incase new String() is used
+				( axis.isNumber(x) && axis.isNumber(y) ) // Becuase NaN === NaN returns false
+			) { return x.toString() === y.toString(); }
+		
+		if (axis.isObject(x) && axis.isObject(y)) {
+			// Deep compare of objects recursively (only comparing if y has the same values as x, not visa versa)
+			for (var p in x) {
+				if (!x.hasOwnProperty(p)) { continue; }
+				if (!y.hasOwnProperty(p)) { return false; }
+				return self.deepCompare(x[p], y[p]);
+			}
+		}
+		
+		return false;
 	},
 	
 	/**
@@ -420,7 +490,7 @@ Module.register("MMM-GPIO", {
 	 */
 	getScripts: function() {
 		var scripts = [];
-		if (typeof axis !== "function") { scripts.push(this.file("scripts/axis.js")); }
+		if (typeof axis !== "object") { scripts.push(this.file("scripts/axis.js")); }
 		return scripts;
 	},
 	
