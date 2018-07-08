@@ -6,15 +6,18 @@
  * MIT Licensed.
  */
 
+var require, module;
+
 /**
  * Load resources required by this module.  
  */
 var NodeHelper = require("node_helper");
-const url = require("url");
 var axis = require("axis.js");
-const exec = require("child_process").exec;
-const Gpio = require('onoff').Gpio;
+var exec = require("child_process").exec;
+var Gpio = require("onoff").Gpio;
 var piBlaster = require("pi-blaster.js");
+var bodyParser = require("body-parser");
+//var stringify = require("json-stringify-safe");
 
 /**
  * Use NodeHelper to create a module.  
@@ -42,11 +45,15 @@ module.exports = NodeHelper.create({
 		self.resourceTimers = {};
 		self.animationTimers = {};
 		self.onoff = {};
-		self.buttonActions = [ "PRESS", "DOUBLE_PRESS", "TRIPPLE_PRESS", "RELEASE", "DOUBLE_RELEASE", "TRIPPLE_RELEASE", "LONG_PRESS", "LONG_RELEASE"];
+		self.buttonActions = [ "PRESS", "DOUBLE_PRESS", "TRIPPLE_PRESS", "RELEASE", "DOUBLE_RELEASE", "TRIPPLE_RELEASE", "LONG_PRESS", "LONG_RELEASE" ];
 		self.sceneActions = [ "SET_SCENE", "INCREASE_SCENE", "DECREASE_SCENE", "TOGGLE_SCENE" ];
 		self.animationActions = [ "START", "STOP", "STOP_ALL" ];
 		
-		this.expressApp.get("/" + self.name, function(req, res) { self.getHandler(req, res); });
+		self.expressApp.use(bodyParser.json());
+		self.expressApp.use(bodyParser.urlencoded({ extended: true }));
+		
+		self.expressApp.get("/" + self.name, function(req, res) { self.requestHandler(req, res); });
+		self.expressApp.post("/" + self.name, function(req, res) { self.requestHandler(req, res); });
 		
 		console.log(self.name + ": module started! Path: " + this.path);
 	},
@@ -424,20 +431,27 @@ module.exports = NodeHelper.create({
 	},
 	
 	/**
-	 * The getHandler function handles 'get' requests sent via a browser
+	 * The requestHandler function handles 'GET' and 'POST' requests
 	 * 
 	 * @param req (object) Contains the request data
 	 * @param res (object) Contains the response data
 	 */
-	getHandler: function(req, res) {
+	requestHandler: function(req, res) {
 		var self = this;
-		var output, i;
-		var payload = url.parse(req.url, true).query;
+		var output, i, payload;
 		
-		if (self.developerMode) { console.log(self.name + ": getHandler(): " + JSON.stringify(payload)); }
+		if (req.method === "GET") { payload = req.query; }
+		else if (req.method === "POST") { payload = req.body; }
+		else {
+			res.send(JSON.stringify({ error: true, message: "Invalid request type.  This module only supports 'GET' or 'POST' request. " }));
+			return;
+		}
+		
+		if (self.developerMode) { console.log(self.name + ": requestHandler(): " + JSON.stringify(payload)); }
 		
 		if (!axis.isString(payload.action)) {
 			res.send(JSON.stringify({ error: true, message: "Unable to proceed.  Please provide an action." }));
+			return;
 		}
 		
 		payload.action = payload.action.toUpperCase();
