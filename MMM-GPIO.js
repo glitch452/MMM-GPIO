@@ -155,30 +155,30 @@ Module.register("MMM-GPIO", {
 		
 		switch (type) {
 			case "LED": typeFull = "LED"; break;
-			case "OUT": typeFull = "Output"; break;
-			case "BTN": typeFull = "Button"; break;
+			case "OUT": typeFull = "output"; break;
+			case "BTN": typeFull = "button"; break;
 			default: return;
 		}
 		
 		if (!axis.isString(resource.name) || resource.name.length < 1) {
-			self.log(("A name has not been provided.  The " + typeFull + " on pin " + resource.pin + " cannot be initialized. "), "warn");
+			self.log(self.translate("MISSING_RESOURCE_NAME", { pin: resource.pin, type: self.translate(typeFull.toUpperCase()) }), "warn");
 			return;
 		}
 		
 		if (self.nameList.includes(resource.name)) {
-			self.log(("The name \"" + resource.name + "\" is already assigned.  The " + typeFull + " on pin " + resource.pin + " cannot be initialized. "), "warn");
+			self.log(self.translate("DUPLICATE_RESOURCE_NAME", { pin: resource.pin, type: self.translate(typeFull.toUpperCase()), name: resource.name }), "warn");
 			return;
 		}
 		
 		pin = resource.pin;
 		resource.pin = self.validatePin(resource.pin);
 		if (axis.isNull(resource.pin) || (type === "LED" && pin === 6)) {
-			self.log(("Invalid pin number provided (" + pin + ").  The " + typeFull + " \"" + resource.name + "\" cannot be initialized. "), "warn");
+			self.log(self.translate("INVALID_PIN", { pin: pin, type: self.translate(typeFull.toUpperCase()), name: resource.name }), "warn");
 			return;
 		}
 		
 		if (self.pinList.includes(resource.pin)) {
-			self.log(("The pin number provided (" + pin + ") is already in use.  The " + typeFull + " \"" + resource.name + "\"cannot be initialized. "), "warn");
+			self.log(self.translate("DUPLICATE_PIN", { pin: resource.pin, type: self.translate(typeFull.toUpperCase()), name: resource.name }), "warn");
 			return;
 		}
 		
@@ -247,7 +247,7 @@ Module.register("MMM-GPIO", {
 		var self = this;
 		
 		if (!axis.isString(scene.name) || scene.name.length < 1) {
-			self.log(("A name has not been provided.  The scene cannot be initialized. "), "warn");
+			self.log(self.translate("MISSING_NAME", { type: self.translate("SCENE") }), "warn");
 			return;
 		}
 		
@@ -256,7 +256,7 @@ Module.register("MMM-GPIO", {
 		result.actions = self.validateActions(scene.actions);
 		
 		if (result.actions.length < 1) {
-			self.log(("No valid actions have been provided.  The scene cannot be initialized. "), "warn");
+			self.log(self.translate("MISSING_ACTIONS", { type: self.translate("SCENE") }), "warn");
 			return;
 		}
 		
@@ -279,13 +279,14 @@ Module.register("MMM-GPIO", {
 		var i, frame, frame_result;
 		
 		if (!axis.isString(animation.name) || animation.name.length < 1) {
-			self.log(("A name has not been provided.  The animation cannot be initialized. "), "warn");
+			self.log(self.translate("MISSING_NAME", { type: self.translate("ANIMATION") }), "warn");
 			return;
 		}
 		
 		var result = { type: "ANI", name: animation.name, frames: [] };
 		
-		if (!axis.isArray(animation.frames)) { animation.frames = [ animation.frames ]; }
+		if (axis.isObject(animation.frames)) { animation.frames = [ animation.frames ]; }
+		else if (!axis.isArray(animation.frames)) { animation.frames = []; }
 		
 		for (i = 0; i < animation.frames.length; i++) {
 			frame = animation.frames[i];
@@ -298,8 +299,8 @@ Module.register("MMM-GPIO", {
 			}
 		}
 		
-		if (axis.isUndefined(result.frames)) {
-			self.log(("No valid frames have been provided.  The animation cannot be initialized. "), "warn");
+		if (result.frames < 1) {
+			self.log(self.translate("MISSING_FRAMES", { type: self.translate("ANIMATION") }), "warn");
 			return;
 		}
 		
@@ -380,7 +381,7 @@ Module.register("MMM-GPIO", {
 		var self = this;
 		
 		// If there is no module ID sent with the notification
-		if (!axis.isObject(payload.original) || !axis.isString(payload.original.instanceID)) {
+		if (!axis.isObject(payload) || !axis.isObject(payload.original) || !axis.isString(payload.original.instanceID)) {
 			if (notification === "LOG") {
 				if (payload.translate) { self.log(self.translate(payload.message, payload.translateVars), payload.logType); }
 				else { self.log(payload.message, payload.logType); }

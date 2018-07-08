@@ -71,7 +71,7 @@ module.exports = NodeHelper.create({
 		if (notification === "GPIO_ACTION") {
 			self.actionHandler(payload);
 		} else if (notification === "INIT") {
-			self.sendSocketNotification("LOG", { original: payload, message: ("INIT received from: " + payload.instanceID + "."), messageType: "dev" } );
+			self.sendSocketNotification("LOG", { original: payload, translate: true, message: "INIT_RECEIVED", translateVars: { instasnce_id: payload.instanceID }, messageType: "dev" });
 			self.initializeResources(payload);
 		}
 	},
@@ -85,8 +85,8 @@ module.exports = NodeHelper.create({
 		var self = this;
 		var resourceList = Object.values(payload.resources);
 		if (self.initializedLED || self.initializedOnOff) {
-			self.sendSocketNotification("LOG", { original: payload, message: ("node_helper.js has already been initialized."), messageType: "dev" } );
-			if (payload.developerMode) { console.log(self.name + ": node_helper.js has already been initialized."); }
+			self.sendSocketNotification("LOG", { original: payload, translate: true, message: "HELPER_ALREADY_INITIALIZED" });
+			console.log(self.name + ": node_helper.js has already been initialized.");
 			self.sendSocketNotification("INIT");
 		} else if (resourceList.length >= 1) {
 			self.developerMode = payload.developerMode;
@@ -100,7 +100,7 @@ module.exports = NodeHelper.create({
 			self.scenes = payload.scenes;
 			self.animations = payload.animations;
 		} else {
-			self.sendSocketNotification("LOG", { original: payload, message: ("Unable to initialize node_helper.js.  No resources have been defined. "), messageType: "dev" } );
+			self.sendSocketNotification("LOG", { original: payload, translate: true, message: "NO_RESOURCES" });
 		}
 	},
 	
@@ -117,13 +117,13 @@ module.exports = NodeHelper.create({
 		if (self.developerMode) { console.log(self.name + ": startPiBlaster() Running command: \"" + command + "\""); }
 		exec(command, { timeout: 1500 }, function(error, stdout, stderr) {
 			if (!error) {
-				self.sendSocketNotification("LOG", { original: null, message: ("Starting PiBlaster... Successfully started PiBlaster on GPIO pin(s) " + gpio + ".") } );
+				self.sendSocketNotification("LOG", { original: null, translate: true, message: "PI_BLASTER_SUCCESS", translateVars: { pin_list: gpio } });
 				console.log(self.name + ": Starting PiBlaster... Successfully started PiBlaster on GPIO pin(s) " + gpio + ".");
 				self.initializedLED = true;
 				self.setInitialValues();
 				self.processName = piBlasterExe.substr(piBlasterExe.lastIndexOf("/") + 1);
 			} else {
-				self.sendSocketNotification("LOG", { original: null, message: ("Starting PiBlaster... Error: " + error) } );
+				self.sendSocketNotification("LOG", { original: null, translate: true, message: "PI_BLASTER_ERROR", translateVars: { error_message: error } });
 				console.log(self.name + ": Starting PiBlaster... " + error);
 			}
 			self.initOnOff();
@@ -155,7 +155,7 @@ module.exports = NodeHelper.create({
 		var i, r, options;
 		var initializedOnOff = false;
 		
-		self.sendSocketNotification("LOG", { original: null, message: ("Initializing Buttons and/or Outputs.") } );
+		self.sendSocketNotification("LOG", { original: null, translate: true, message: "INITIALIZE_BTN_OUT" });
 		console.log(self.name + ": Initializing Buttons and/or Outputs.");
 		
 		var resourceList = Object.keys(self.resources);
@@ -190,7 +190,8 @@ module.exports = NodeHelper.create({
 			}
 		}
 		self.initializedOnOff = initializedOnOff;
-		if (self.developerMode) { self.sendSocketNotification("LOG", { original: null, message: ("node_helper.js initialization complete."), messageType: "dev" } ); }
+		self.sendSocketNotification("LOG", { original: null, translate: true, message: "INITIALIZE_COMPLETE" });
+		console.log(self.name + ": node_helper.js initialization complete.");
 		if (self.initializedLED || self.initializedOnOff) { self.sendSocketNotification("INIT"); }
 	},
 	
