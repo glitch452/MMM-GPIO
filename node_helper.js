@@ -52,8 +52,8 @@ module.exports = NodeHelper.create({
 		self.expressApp.use(bodyParser.json());
 		self.expressApp.use(bodyParser.urlencoded({ extended: true }));
 		
-		self.expressApp.get("/" + self.name, function(req, res) { self.requestHandler(req, res); });
-		self.expressApp.post("/" + self.name, function(req, res) { self.requestHandler(req, res); });
+		self.expressApp.get("/" + self.name + "/requests", function(req, res) { self.requestHandler(req, res); });
+		self.expressApp.post("/" + self.name + "/requests", function(req, res) { self.requestHandler(req, res); });
 		
 		console.log(self.name + ": module started! Path: " + this.path);
 	},
