@@ -50,7 +50,7 @@ Module.register("MMM-GPIO", {
 		var i;
 		self.initialized = false;
 		self.instanceID = self.identifier + "_" + Math.random().toString().substring(2);
-		self.defaults.scriptPath = self.data.path + "pi-blaster";
+		self.defaults.scriptPath = self.data.path + "pi-blaster-pi4-deb10";
 		self.resources = {};
 		self.scenes = {};
 		self.animations = {};
