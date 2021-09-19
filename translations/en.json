@@ -1,0 +1,26 @@
+{
+	"RESOURCE": "resource",
+	"LED": "LED",
+	"BUTTON": "button",
+	"OUTPUT": "output",
+	"ANIMATION": "animation",
+	"SCENE": "scene",
+	"TRIGGER": "trigger",
+	
+	"MISSING_RESOURCE_NAME": "A name has not been provided.  The {type} on pin {pin} cannot be initialized.",
+	"DUPLICATE_RESOURCE_NAME": "The name {name} is already assigned.  The {type} on pin {pin} cannot be initialized.",
+	"INVALID_PIN": "Invalid pin number provided ({pin}).  The {type} \"{name}\" cannot be initialized.",
+	"DUPLICATE_PIN": "The pin number provided ({pin}) is already in use.  The {type} \"{name}\" cannot be initialized.",
+	
+	"MISSING_NAME": "A name has not been provided.  The {type} cannot be initialized.",
+	"MISSING_ACTIONS": "No valid actions have been provided.  The {type} cannot be initialized.",
+	"MISSING_FRAMES": "No valid frames have been provided.  The {type} cannot be initialized.",
+	
+	"INIT_RECEIVED": "INIT request received from: {instasnce_id}.",
+	"HELPER_ALREADY_INITIALIZED": "Node helper has already been initialized.",
+	"NO_RESOURCES": "Unable to initialize node helper.  No resources have been defined.",
+	"PI_BLASTER_SUCCESS": "Starting PiBlaster... Successfully started PiBlaster on GPIO pin(s) {pin_list}.",
+	"PI_BLASTER_ERROR": "Starting PiBlaster... Error: {error_message}",
+	"INITIALIZE_BTN_OUT": "Initializing Buttons and/or Outputs.",
+	"INITIALIZE_COMPLETE": "Node helper initialization complete."
+}

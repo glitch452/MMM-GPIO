@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+    <title>Test | MMM-GPIO</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+	<script src="jquery-3.3.1.min.js"></script>
+	<script type="text/javascript">
+		$(document).ready(function() {
+			$("#gpio-feedback").text("Ready");
+			//$("#tstBtn").click(function() { $("#gpio-feedback").text("Test!"); });
+			$("#gpioForm").submit(function(e) {
+				e.preventDefault();
+				$("#gpio-feedback").text("Sending...");
+				$("#gpio-data").text("");
+				var data = $(this).serialize();
+				
+				$.ajax({
+					url: "/MMM-GPIO/requests",
+					method: $("#gpioFormMethod").val(),
+					data: data,
+					async: true,
+					cache: false,
+					dataType: "json",
+					success: function(data, textStatus, jqXHR) {
+						if (data.error) { $("#gpio-feedback").text("error"); }
+						else { $("#gpio-feedback").text(textStatus); }
+						
+						$("#gpio-data").text(JSON.stringify(data));
+					},
+					error: function(jqXHR, textStatus, error) {
+						$("#gpio-feedback").text(textStatus + ": " + error);
+					}
+				});
+			});
+		});
+		
+	</script>
+</head>
+<body>
+	<form id="gpioForm" action="/MMM-GPIO">
+		<table cellspacing="0" cellpadding="5" border="0">
+			<tr>
+				<th><label for="gpioFormMethod">Method: </label></th>
+				<td>
+					<select name="method" id="gpioFormMethod">
+						<option value="POST">POST</option>
+						<option value="GET">GET</option>
+					</select>
+				</td>
+			</tr>
+			<tr>
+				<th><label for="action">Action: </label></th>
+				<td>
+					<select name="action" id="action">
+						<optgroup label="Resrouces">
+							<option value="SET">SET</option>
+							<option value="TOGGLE">TOGGLE</option>
+							<option value="INCREASE">INCREASE</option>
+							<option value="DECREASE">DECREASE</option>
+						</optgroup>
+						<optgroup label="Scenes">
+							<option value="SET_SCENE">SET_SCENE</option>
+							<option value="INCREASE_SCENE">INCREASE_SCENE</option>
+							<option value="DECREASE_SCENE">DECREASE_SCENE</option>
+							<option value="TOGGLE_SCENE">TOGGLE_SCENE</option>
+						</optgroup>
+						<optgroup label="Animations">
+							<option value="START">START</option>
+							<option value="STOP">STOP</option>
+							<option value="STOP_ALL">STOP_ALL</option>
+						</optgroup>
+						<optgroup label="Buttons">
+							<option value="PRESS">PRESS</option>
+							<option value="DOUBLE_PRESS">DOUBLE_PRESS</option>
+							<option value="TRIPPLE_PRESS">TRIPPLE_PRESS</option>
+							<option value="RELEASE">RELEASE</option>
+							<option value="DOUBLE_RELEASE">DOUBLE_RELEASE</option>
+							<option value="TRIPPLE_RELEASE">TRIPPLE_RELEASE</option>
+							<option value="LONG_PRESS">LONG_PRESS</option>
+							<option value="LONG_RELEASE">LONG_RELEASE</option>
+						</optgroup>
+						<optgroup label="Get Data">
+							<option value="GET">GET</option>
+							<option value="GET_SCENE">GET_SCENE</option>
+							<option value="GET_ANIMATION">GET_ANIMATION</option>
+							<option value="GET_ALL">GET_ALL</option>
+						</optgroup>
+					</select>
+				</td>
+			</tr>
+			<tr>
+				<th><label for="name">Name: </label></th>
+				<td><input type="text" name="name" id="name" /></td>
+			</tr>
+			<tr>
+				<th><label for="value">Value: </label></th>
+				<td><input type="text" name="value" id="value" /></td>
+			</tr>
+			<tr>
+				<th><label for="time">Time: </label></th>
+				<td><input type="text" name="time" id="time" /></td>
+			</tr>
+			<tr>
+				<th><label for="offTime">Off Time: </label></th>
+				<td><input type="text" name="offTime" id="offTime" /></td>
+			</tr>
+			<tr>
+				<th><label for="delay">Delay: </label></th>
+				<td><input type="text" name="delay" id="delay" /></td>
+			</tr>
+			<tr>
+				<td align="center"><input type="submit" value="Submit" /></td>
+				<td align="left" id="gpio-feedback">&nbsp;</td>
+			</tr>
+		</table>
+		<br /><span id="gpio-data"></span>
+	</form>
+</body>
+</html>
