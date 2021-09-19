@@ -45,7 +45,7 @@ module.exports = NodeHelper.create({
 		self.resourceTimers = {};
 		self.animationTimers = {};
 		self.onoff = {};
-		self.buttonActions = [ "PRESS", "DOUBLE_PRESS", "TRIPPLE_PRESS", "RELEASE", "DOUBLE_RELEASE", "TRIPPLE_RELEASE", "LONG_PRESS", "LONG_RELEASE" ];
+		self.buttonActions = [ "PRESS", "DOUBLE_PRESS", "TRIPLE_PRESS", "RELEASE", "DOUBLE_RELEASE", "TRIPLE_RELEASE", "LONG_PRESS", "LONG_RELEASE" ];
 		self.sceneActions = [ "SET_SCENE", "INCREASE_SCENE", "DECREASE_SCENE", "TOGGLE_SCENE" ];
 		self.animationActions = [ "START", "STOP", "STOP_ALL" ];
 		
@@ -90,6 +90,7 @@ module.exports = NodeHelper.create({
 			self.sendSocketNotification("INIT");
 		} else if (resourceList.length >= 1) {
 			self.developerMode = payload.developerMode;
+			self.usingPiBlasterService = payload.usingPiBlasterService;
 			self.resources = payload.resources;
 			var pinListLED = [];
 			for (var i = 0; i < resourceList.length; i++) {
@@ -113,21 +114,27 @@ module.exports = NodeHelper.create({
 	 */
 	startPiBlaster: function(piBlasterExe, gpio) {
 		var self = this;
-		var command = "sudo " + piBlasterExe + " -g " + gpio;
-		if (self.developerMode) { console.log(self.name + ": startPiBlaster() Running command: \"" + command + "\""); }
-		exec(command, { timeout: 1500 }, function(error, stdout, stderr) {
-			if (!error) {
-				self.sendSocketNotification("LOG", { original: null, translate: true, message: "PI_BLASTER_SUCCESS", translateVars: { pin_list: gpio } });
-				console.log(self.name + ": Starting PiBlaster... Successfully started PiBlaster on GPIO pin(s) " + gpio + ".");
-				self.initializedLED = true;
-				self.setInitialValues();
-				self.processName = piBlasterExe.substr(piBlasterExe.lastIndexOf("/") + 1);
-			} else {
-				self.sendSocketNotification("LOG", { original: null, translate: true, message: "PI_BLASTER_ERROR", translateVars: { error_message: error } });
-				console.log(self.name + ": Starting PiBlaster... " + error);
-			}
+		if (self.usingPiBlasterService) {
+			self.initializedLED = true;
+			self.setInitialValues();
 			self.initOnOff();
-		});
+		} else {
+			var command = "sudo " + piBlasterExe + " -g " + gpio;
+			if (self.developerMode) { console.log(self.name + ": startPiBlaster() Running command: \"" + command + "\""); }
+			exec(command, { timeout: 1500 }, function(error, stdout, stderr) {
+				if (!error) {
+					self.sendSocketNotification("LOG", { original: null, translate: true, message: "PI_BLASTER_SUCCESS", translateVars: { pin_list: gpio } });
+					console.log(self.name + ": Starting PiBlaster... Successfully started PiBlaster on GPIO pin(s) " + gpio + ".");
+					self.initializedLED = true;
+					self.setInitialValues();
+					self.processName = piBlasterExe.substr(piBlasterExe.lastIndexOf("/") + 1);
+				} else {
+					self.sendSocketNotification("LOG", { original: null, translate: true, message: "PI_BLASTER_ERROR", translateVars: { error_message: error } });
+					console.log(self.name + ": Starting PiBlaster... " + error);
+				}
+				self.initOnOff();
+			});
+		}
 	},
 	
 	/**
@@ -152,7 +159,7 @@ module.exports = NodeHelper.create({
 	 */
 	initOnOff: function() {
 		var self = this;
-		var i, r, options;
+		var i, r, options, value;
 		var initializedOnOff = false;
 		
 		self.sendSocketNotification("LOG", { original: null, translate: true, message: "INITIALIZE_BTN_OUT" });
@@ -165,7 +172,9 @@ module.exports = NodeHelper.create({
 				if (self.developerMode) { console.log(self.name + ": Initializing resource (Output) \"" + r.name + "\" on pin \"" + r.pin + "\"."); }
 				initializedOnOff = true;
 				self.onoff[r.name] = new Gpio(r.pin, "out");
-				self.setOUT(r, r.value);
+				value = r.value;
+				r.value = null;
+				self.setOUT(r, value);
 			} else if (r.type === "BTN") {
 				if (r.numShortPress < 1 && !r.enableLongPress) {
 					if (self.developerMode) { console.log(self.name + ": Not Initializing resource (Button) \"" + r.name + "\" on pin \"" + r.pin + "\".  No actions are assigned."); }
@@ -265,7 +274,7 @@ module.exports = NodeHelper.create({
 					clearTimeout(self.resourceTimers[r.releaseID]);
 					r.releaseCount = 3;
 					r.pressCount = 0;
-					self.buttonPressHandler(r, "TRIPPLE_PRESS");
+					self.buttonPressHandler(r, "TRIPLE_PRESS");
 					
 				}
 				
@@ -288,7 +297,7 @@ module.exports = NodeHelper.create({
 						self.resourceTimers[r.releaseID] = setTimeout(function(){ self.buttonPressHandler(r, "DOUBLE_RELEASE"); }, r.multiPressTimeout);
 					}
 				} else if (r.releaseCount === 3) {
-					self.buttonPressHandler(r, "TRIPPLE_RELEASE");
+					self.buttonPressHandler(r, "TRIPLE_RELEASE");
 				} else if (r.releaseCount === 4) {
 					self.buttonPressHandler(r, "LONG_RELEASE");
 				} else {
@@ -662,7 +671,8 @@ module.exports = NodeHelper.create({
 	setOUT: function(r, value) {
 		var self = this;
 		if (axis.isString(value)) { value = Number(value); }
-		if (!self.initializedOnOff || (value !== 0 && value !== 1)) { return; }
+		if (!self.initializedOnOff || value < 0) { return; }
+		if (value !== 0) { value = 1; }
 		if (self.developerMode) { console.log(self.name + ": setOUT(): Name: \"" + r.name + "\" Pin: \"" + r.pin + "\" value: \"" + value + "\""); }
 		var actualValue = value;
 		if (r.activeLow) { actualValue = value === 0 ? 1 : 0; }
@@ -898,8 +908,8 @@ module.exports = NodeHelper.create({
 				self.onoff[r.name].unexport();
 			}
 		}
-		// Stop the pi-blaster instance(s) that is/are running
-		if (self.initializedLED) {
+		// Stop the pi-blaster instance that is running
+		if (self.initializedLED && !self.usingPiBlasterService) {
 			exec("sudo pkill " + self.processName, { timeout: 1500 }, function(error, stdout, stderr) { });
 		}
 	}

@@ -19,9 +19,9 @@ Module.register("MMM-GPIO", {
 	 * The default configuration options
 	 */
 	defaults: {
+		outputs: [],
 		leds: [],
 		buttons: [],
-		outputs: [],
 		scenes: [],
 		animations: [],
 		triggers: [],
@@ -31,6 +31,7 @@ Module.register("MMM-GPIO", {
 		multiPressTimeout: 325,
 		longPressTime: 4000,
 		clearAlertOnRelease: false,
+		usingPiBlasterService: false,
 		scriptPath: null, // Set in self.start() becuase access to self.data.path is needed
 		
 		developerMode: false
@@ -91,8 +92,8 @@ Module.register("MMM-GPIO", {
 			onRelease: "RELEASE",
 			onDoublePress: "DOUBLE_PRESS",
 			onDoubleRelease: "DOUBLE_RELEASE",
-			onTripplePress: "TRIPPLE_PRESS",
-			onTrippleRelease: "TRIPPLE_RELEASE",
+			onTriplePress: "TRIPLE_PRESS",
+			onTripleRelease: "TRIPLE_RELEASE",
 			onLongPress: "LONG_PRESS",
 			onLongRelease: "LONG_RELEASE",
 		};
@@ -107,12 +108,14 @@ Module.register("MMM-GPIO", {
 		if (!axis.isNumber(self.config.debounceTimeout) || isNaN(self.config.debounceTimeout) || self.config.debounceTimeout < 0 ) { self.config.debounceTimeout = self.defaults.debounceTimeout; }
 		if (!axis.isNumber(self.config.multiPressTimeout) || isNaN(self.config.multiPressTimeout) || self.config.multiPressTimeout < 0 ) { self.config.multiPressTimeout = self.defaults.multiPressTimeout; }
 		if (!axis.isNumber(self.config.longPressTime) || isNaN(self.config.longPressTime) || self.config.longPressTime < 0 ) { self.config.longPressTime = self.defaults.longPressTime; }
+		if (!axis.isBoolean(self.config.usingPiBlasterService)) { self.config.usingPiBlasterService = self.defaults.usingPiBlasterService; }
 		
-		if (!axis.isArray(self.config.leds)) { self.config.leds = [ self.config.leds ]; }
-		if (!axis.isArray(self.config.outputs)) { self.config.outputs = [ self.config.outputs ]; }
-		if (!axis.isArray(self.config.buttons)) { self.config.buttons = [ self.config.buttons ]; }
-		if (!axis.isArray(self.config.scenes)) { self.config.scenes = [ self.config.scenes ]; }
-		if (!axis.isArray(self.config.animations)) { self.config.animations = [ self.config.animations ]; }
+		var resourceTypes = [ "leds", "outputs", "buttons", "scenes", "animations", "triggers" ];
+		for (i = 0; i < resourceTypes.length; i++) {
+			var typeName = resourceTypes[i];
+			if (axis.isObject(self.config[typeName])) { self.config[typeName] = [ self.config[typeName] ]; }
+			else if (!axis.isArray(self.config[typeName])) { self.config[typeName] = self.defaults[typeName]; }
+		}
 		
 		// Loop through the provided configurations and add valid ones to the resources
 		for (i = 0; i < self.config.leds.length; i++) { self.addResource("LED", self.config.leds[i]); }
@@ -134,6 +137,7 @@ Module.register("MMM-GPIO", {
 		
 		self.sendSocketNotification("INIT", {
 			instanceID: self.instanceID,
+			usingPiBlasterService: self.config.usingPiBlasterService,
 			scriptPath: self.config.scriptPath,
 			resources: self.resources,
 			scenes: self.scenes,
@@ -220,7 +224,7 @@ Module.register("MMM-GPIO", {
 				result[actionName] = self.validateActions(resource[triggerName]);
 			}
 			
-			if (result.TRIPPLE_PRESS.length > 0 || result.TRIPPLE_RELEASE.length > 0) { result.numShortPress = 3; }
+			if (result.TRIPLE_PRESS.length > 0 || result.TRIPLE_RELEASE.length > 0) { result.numShortPress = 3; }
 			else if (result.DOUBLE_PRESS.length > 0 || result.DOUBLE_RELEASE.length > 0) { result.numShortPress = 2; }
 			else if (result.PRESS.length > 0 || result.RELEASE.length > 0) { result.numShortPress = 1; }
 			else { result.numShortPress = 0; }

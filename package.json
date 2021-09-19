@@ -17,7 +17,6 @@
 		"gpio"
 	],
 	"author": "David Dearden",
-	"contributors": "https://github.com/glitch452/MMM-GPIO/graphs/contributors",
 	"license": "MIT",
 	"bugs": {
 		"url": "https://github.com/glitch452/MMM-GPIO/issues"
