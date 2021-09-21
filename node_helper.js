@@ -125,7 +125,6 @@ module.exports = NodeHelper.create({
 				if (!error) {
 					const parts = piBlasterExe.split("/");
 					self.processName = parts[parts.length - 1];
-					// self.processName = piBlasterExe.substr(piBlasterExe.lastIndexOf("/") + 1);
 					self.sendSocketNotification("LOG", { original: null, translate: true, message: "PI_BLASTER_SUCCESS", translateVars: { pin_list: gpio } });
 					console.log(self.name + `: Starting PiBlaster... Started "${self.processName}" on GPIO pin(s) ${gpio}.`);
 					self.initializedLED = true;
@@ -912,7 +911,7 @@ module.exports = NodeHelper.create({
 		}
 		// Stop the pi-blaster instance that is running
 		if (self.initializedLED && !self.usingPiBlasterService) {
-			exec("sudo pkill " + self.processName, { timeout: 1500 }, function(error, stdout, stderr) { });
+			exec("sudo killall -r " + self.processName, { timeout: 1500 }, function(error, stdout, stderr) { });
 		}
 	}
 	
