@@ -7,7 +7,7 @@ This module also has the ability to trigger pre-configured scenes and animations
 
 | Status       | Version | Date       | Maintained? | Minimum MagicMirror² Version |
 |:------------ |:------- |:---------- |:----------- |:---------------------------- |
-| Experimental | `0.1.0` | 2020-09-19 | No          |`2.2.1`                       |
+| Experimental | `0.2.0` | 2020-09-24 | No          |`2.2.1`                       |
 
 ### Example
 ![Rainbow colours animation on an RGB ring LED controlled by MMM-GPIO](images/rainbow.gif?raw=true "LED Animation Example")
