@@ -121,18 +121,22 @@ module.exports = NodeHelper.create({
 		} else {
 			var command = "sudo " + piBlasterExe + " -g " + gpio;
 			if (self.developerMode) { console.log(self.name + ": startPiBlaster() Running command: \"" + command + "\""); }
-			exec(command, { timeout: 1500 }, function(error, stdout, stderr) {
-				if (!error) {
-					self.sendSocketNotification("LOG", { original: null, translate: true, message: "PI_BLASTER_SUCCESS", translateVars: { pin_list: gpio } });
-					console.log(self.name + ": Starting PiBlaster... Successfully started PiBlaster on GPIO pin(s) " + gpio + ".");
-					self.initializedLED = true;
-					self.setInitialValues();
-					self.processName = piBlasterExe.substr(piBlasterExe.lastIndexOf("/") + 1);
-				} else {
-					self.sendSocketNotification("LOG", { original: null, translate: true, message: "PI_BLASTER_ERROR", translateVars: { error_message: error } });
-					console.log(self.name + ": Starting PiBlaster... " + error);
-				}
-				self.initOnOff();
+			const parts = piBlasterExe.split("/");
+			self.processName = parts[parts.length - 1];
+			// Kill any already running process instances before starting a new one
+			exec("sudo pkill pi-blaster", { timeout: 1500 }, function(error, stdout, stderr) {
+				exec(command, { timeout: 1500 }, function(error, stdout, stderr) {
+					if (!error) {
+						self.sendSocketNotification("LOG", { original: null, translate: true, message: "PI_BLASTER_SUCCESS", translateVars: { pin_list: gpio } });
+						console.log(self.name + `: Starting PiBlaster... Started "${self.processName}" on GPIO pin(s) ${gpio}.`);
+						self.initializedLED = true;
+						self.setInitialValues();
+					} else {
+						self.sendSocketNotification("LOG", { original: null, translate: true, message: "PI_BLASTER_ERROR", translateVars: { error_message: error } });
+						console.log(self.name + ": Starting PiBlaster... " + error);
+					}
+					self.initOnOff();
+				});
 			});
 		}
 	},
@@ -910,7 +914,7 @@ module.exports = NodeHelper.create({
 		}
 		// Stop the pi-blaster instance that is running
 		if (self.initializedLED && !self.usingPiBlasterService) {
-			exec("sudo pkill " + self.processName, { timeout: 1500 }, function(error, stdout, stderr) { });
+			exec("sudo pkill pi-blaster", { timeout: 1500 }, function(error, stdout, stderr) { });
 		}
 	}
 	
